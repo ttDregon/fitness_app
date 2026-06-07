@@ -3,6 +3,8 @@ services:
     name: fitness-app-backend
     runtime: python
     plan: free
+    pythonVersion: 3.11.7
+    rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
@@ -12,5 +14,3 @@ services:
         scope: build,runtime
       - key: SUPABASE_KEY
         scope: build,runtime
-      - key: PYTHON_VERSION
-        value: 3.11.7

@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Weight Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:       #080D18;
+  --bg2:      #0D1322;
+  --card:     #101828;
+  --card2:    #161F30;
+  --card3:    #1A2438;
+  --border:   rgba(255,255,255,0.06);
+  --border2:  rgba(255,255,255,0.10);
+  --accent:   #22D3EE;
+  --accent2:  #0891B2;
+  --glow:     rgba(34,211,238,0.14);
+  --target:   #F59E0B;
+  --tglow:    rgba(245,158,11,0.12);
+  --text:     #F0F6FF;
+  --text2:    #8B9EC0;
+  --text3:    #4A5D7A;
+  --danger:   #FB7185;
+  --success:  #34D399;
+  --r:        20px;
+  --r2:       14px;
+  --r3:       10px;
+}
+
+html,body{
+  width:100%; min-height:100vh;
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Inter',system-ui,-apple-system,BlinkMacSystemFont,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+/* ── Background glow ── */
+body::before{
+  content:'';
+  position:fixed; top:-200px; left:50%; transform:translateX(-50%);
+  width:600px; height:500px;
+  background:radial-gradient(ellipse at center, rgba(34,211,238,0.06) 0%, transparent 70%);
+  pointer-events:none; z-index:0;
+}
+
+body{
+  display:flex; justify-content:center;
+  padding:28px 16px 56px;
+  position:relative; z-index:1;
+}
+
+.app{
+  width:100%; max-width:400px;
+  display:flex; flex-direction:column; gap:12px;
+}
+
+/* ── Header ── */
+.header{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:4px 2px 8px;
+}
+.header-title{
+  font-size:20px; font-weight:800; letter-spacing:-0.4px;
+  color:var(--text);
+}
+.header-date{
+  font-size:12px; color:var(--text3); font-weight:500; margin-top:2px;
+}
+.header-btn{
+  width:42px; height:42px;
+  background:var(--card); border:1px solid var(--border2);
+  border-radius:14px;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer;
+  transition:background 0.2s;
+}
+.header-btn:hover{background:var(--card2);}
+
+/* ── Tabs ── */
+.tabs{
+  background:var(--card); border:1px solid var(--border);
+  border-radius:16px; padding:5px;
+  display:flex; gap:3px;
+}
+.tab{
+  flex:1; border:none; background:transparent;
+  color:var(--text3); font-family:inherit;
+  font-size:13px; font-weight:600;
+  padding:9px 0; border-radius:12px;
+  cursor:pointer;
+  transition:all 0.25s cubic-bezier(0.4,0,0.2,1);
+  position:relative; outline:none;
+}
+.tab.active{
+  background:rgba(34,211,238,0.10);
+  color:var(--accent);
+}
+.tab.active::after{
+  content:'';
+  position:absolute; bottom:7px; left:50%; transform:translateX(-50%);
+  width:14px; height:2px;
+  background:var(--accent); border-radius:2px;
+}
+
+/* ── Main card ── */
+.main-card{
+  background:var(--card); border:1px solid var(--border);
+  border-radius:24px; padding:22px 20px 18px;
+  position:relative; overflow:hidden;
+}
+.main-card::before{
+  content:'';
+  position:absolute; top:-60px; right:-60px;
+  width:200px; height:200px;
+  background:radial-gradient(circle, rgba(34,211,238,0.07) 0%, transparent 70%);
+  pointer-events:none;
+}
+
+/* Top row: big avg + badge */
+.top-row{
+  display:flex; justify-content:space-between; align-items:flex-start;
+  margin-bottom:20px;
+}
+.avg-block{}
+.avg-period{
+  font-size:12px; color:var(--text3); font-weight:500;
+  letter-spacing:0.3px; margin-bottom:4px;
+  text-transform:capitalize;
+  display:flex; align-items:center; gap:6px;
+}
+.avg-period svg{opacity:0.5;}
+.avg-num{
+  font-size:44px; font-weight:900; letter-spacing:-2px; line-height:1;
+  color:var(--text);
+}
+.avg-num sup{font-size:18px; font-weight:500; color:var(--text2); letter-spacing:-0.5px; vertical-align:super; margin-left:2px;}
+.avg-sub{font-size:11px; color:var(--text3); margin-top:4px; font-weight:500;}
+
+.last-badge{
+  display:flex; flex-direction:column; align-items:flex-end; gap:4px;
+  flex-shrink:0;
+}
+.last-weight{
+  font-size:17px; font-weight:700; color:var(--text); letter-spacing:-0.3px;
+}
+.delta-pill{
+  font-size:11px; font-weight:700;
+  padding:3px 9px; border-radius:20px;
+  white-space:nowrap;
+}
+.up  {color:var(--danger);  background:rgba(251,113,133,0.12);}
+.down{color:var(--success); background:rgba(52,211,153,0.12);}
+.zero{color:var(--text3);   background:var(--card2);}
+
+/* ── Chart ── */
+.chart-area{
+  position:relative; height:195px;
+  margin:0 -6px;
+}
+.chart-area canvas{display:block;}
+
+/* Custom tooltip */
+.c-tooltip{
+  position:absolute; pointer-events:none;
+  opacity:0; transition:opacity 0.15s ease;
+  background:var(--card2); border:1px solid var(--border2);
+  border-radius:12px; padding:9px 13px;
+  transform:translate(-50%, -100%);
+  margin-top:-10px; white-space:nowrap;
+  backdrop-filter:blur(8px);
+  z-index:10;
+}
+.c-tooltip.show{opacity:1;}
+.c-tooltip-label{font-size:10px; color:var(--text3); font-weight:600; letter-spacing:0.5px; margin-bottom:2px;}
+.c-tooltip-val{font-size:15px; font-weight:800; color:var(--text); letter-spacing:-0.3px;}
+
+/* ── Stats row ── */
+.stats{
+  display:flex; padding-top:16px; margin-top:8px;
+  border-top:1px solid var(--border);
+}
+.stat{flex:1; text-align:center;}
+.stat+.stat{border-left:1px solid var(--border);}
+.stat-label{
+  font-size:9px; font-weight:700; letter-spacing:1px;
+  color:var(--text3); text-transform:uppercase; margin-bottom:5px;
+}
+.stat-val{font-size:16px; font-weight:800; letter-spacing:-0.3px; color:var(--text);}
+
+/* ── Target card ── */
+.target-card{
+  background:var(--card); border:1px solid var(--border);
+  border-radius:var(--r); padding:16px 18px;
+  display:flex; align-items:center; gap:14px;
+}
+.target-icon{
+  width:42px; height:42px; flex-shrink:0;
+  background:var(--tglow); border:1px solid rgba(245,158,11,0.18);
+  border-radius:14px;
+  display:flex; align-items:center; justify-content:center;
+}
+.target-text{flex:1; min-width:0;}
+.target-lbl{font-size:10px; color:var(--text3); font-weight:700; letter-spacing:0.8px; margin-bottom:3px;}
+.target-val{font-size:19px; font-weight:800; color:var(--target); letter-spacing:-0.5px;}
+.target-rem{font-size:11px; color:var(--text2); margin-top:2px; font-weight:500;}
+.goal-side{min-width:80px; flex-shrink:0;}
+.goal-bar-bg{height:5px; background:var(--border2); border-radius:3px; overflow:hidden;}
+.goal-bar-fill{
+  height:100%; border-radius:3px;
+  background:linear-gradient(90deg, var(--target), #FCD34D);
+  transition:width 0.7s cubic-bezier(0.4,0,0.2,1);
+}
+.goal-pct{font-size:10px; color:var(--text3); text-align:right; margin-top:4px; font-weight:600;}
+
+/* ── Bottom row ── */
+.bottom-row{display:flex; gap:12px;}
+
+.info-card{
+  flex:1; background:var(--card); border:1px solid var(--border);
+  border-radius:var(--r); padding:16px;
+  min-width:0;
+}
+.ic-lbl{font-size:10px; font-weight:700; letter-spacing:0.8px; color:var(--text3); margin-bottom:6px;}
+.ic-val{font-size:24px; font-weight:900; letter-spacing:-0.8px; color:var(--text); line-height:1;}
+.ic-unit{font-size:12px; font-weight:500; color:var(--text2); letter-spacing:0;}
+.ic-sub{font-size:11px; color:var(--text2); margin-top:3px; font-weight:500;}
+.ic-sub3{font-size:11px; color:var(--text3); margin-top:2px;}
+
+/* BMI bar */
+.bmi-scale{
+  position:relative; height:4px;
+  background:transparent;
+  border-radius:2px; margin-top:12px;
+  display:flex; overflow:hidden;
+}
+.bmi-seg{height:100%;}
+.bmi-seg.s1{background:#34D399; flex:3.5;}
+.bmi-seg.s2{background:#FCD34D; flex:2.5;}
+.bmi-seg.s3{background:#FB923C; flex:2.5;}
+.bmi-seg.s4{background:#FB7185; flex:1.5;}
+.bmi-marker-wrap{
+  position:absolute; top:-4px;
+  width:12px; height:12px;
+  transform:translateX(-50%);
+  transition:left 0.6s cubic-bezier(0.4,0,0.2,1);
+}
+.bmi-dot{
+  width:12px; height:12px;
+  background:var(--accent); border:2px solid var(--card);
+  border-radius:50%;
+}
+
+/* ── Animations ── */
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+.main-card,.target-card,.info-card{animation:fadeIn 0.35s ease both;}
+.main-card{animation-delay:0.05s;}
+.target-card{animation-delay:0.10s;}
+.info-card:nth-child(1){animation-delay:0.15s;}
+.info-card:nth-child(2){animation-delay:0.18s;}
+
+/* ── Desktop wider ── */
+@media(min-width:600px){
+  .app{max-width:480px;}
+  .avg-num{font-size:52px;}
+  .chart-area{height:220px;}
+}
+</style>
+</head>
+
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <div class="header-title">Weight Tracker</div>
+      <div class="header-date" id="hdr-date"></div>
+    </div>
+    <div class="header-btn">
+      <!-- scale icon -->
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 20h12"/><path d="M12 16v4"/>
+        <path d="M5 8a7 7 0 0 1 14 0"/>
+        <path d="M3 12h2M19 12h2"/>
+        <circle cx="12" cy="8" r="1" fill="#22D3EE" stroke="none"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Period tabs -->
+  <div class="tabs">
+    <button class="tab" data-p="day">День</button>
+    <button class="tab active" data-p="week">Неделя</button>
+    <button class="tab" data-p="month">Месяц</button>
+    <button class="tab" data-p="year">Год</button>
+  </div>
+
+  <!-- Main card: avg + chart + stats -->
+  <div class="main-card">
+    <div class="top-row">
+      <div class="avg-block">
+        <div class="avg-period">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22D3EE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          <span id="period-lbl">май: неделя</span>
+        </div>
+        <div class="avg-num" id="avg-num">93.9<sup>кг</sup></div>
+        <div class="avg-sub" id="avg-sub">Среднее за неделю</div>
+      </div>
+      <div class="last-badge">
+        <div class="last-weight" id="last-w">93.6 кг</div>
+        <div class="delta-pill down" id="delta-pill">−0.60</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:2px;" id="delta-vs">за неделю</div>
+      </div>
+    </div>
+
+    <div class="chart-area">
+      <canvas id="wChart"></canvas>
+      <div class="c-tooltip" id="ctt">
+        <div class="c-tooltip-label" id="ctt-lbl"></div>
+        <div class="c-tooltip-val"  id="ctt-val"></div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">МИН</div>
+        <div class="stat-val" id="s-min">93.6</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">МАКС</div>
+        <div class="stat-val" id="s-max">94.2</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">ИЗМЕНЕНИЕ</div>
+        <div class="stat-val" id="s-chg" style="color:var(--success)">−0.6</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Goal / Target -->
+  <div class="target-card">
+    <div class="target-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="1.8" stroke-linecap="round">
+        <circle cx="12" cy="12" r="10"/>
+        <circle cx="12" cy="12" r="6"/>
+        <circle cx="12" cy="12" r="2"/>
+      </svg>
+    </div>
+    <div class="target-text">
+      <div class="target-lbl">ЦЕЛЬ</div>
+      <div class="target-val">85.0 кг</div>
+      <div class="target-rem" id="t-rem">осталось 8.6 кг</div>
+    </div>
+    <div class="goal-side">
+      <div class="goal-bar-bg">
+        <div class="goal-bar-fill" id="g-fill" style="width:17%"></div>
+      </div>
+      <div class="goal-pct" id="g-pct">17%</div>
+    </div>
+  </div>
+
+  <!-- BMI + Last -->
+  <div class="bottom-row">
+    <div class="info-card">
+      <div class="ic-lbl">BMI</div>
+      <div class="ic-val" id="bmi-v">27.6<span class="ic-unit"></span></div>
+      <div class="ic-sub" id="bmi-cat">Избыточный вес</div>
+      <div class="bmi-scale">
+        <div class="bmi-seg s1"></div>
+        <div class="bmi-seg s2"></div>
+        <div class="bmi-seg s3"></div>
+        <div class="bmi-seg s4"></div>
+        <div class="bmi-marker-wrap" id="bmi-m"><div class="bmi-dot"></div></div>
+      </div>
+    </div>
+
+    <div class="info-card">
+      <div class="ic-lbl">ПОСЛЕДНЕЕ</div>
+      <div class="ic-val">93.6<span class="ic-unit"> кг</span></div>
+      <div class="ic-sub" id="last-delta" style="color:var(--danger)">+0.60 к вчера</div>
+      <div class="ic-sub3" id="last-time">сегодня, 10:14</div>
+    </div>
+  </div>
+
+</div><!-- /.app -->
+
+<script>
+// ─────────────────────────────────────────────
+// Mock data
+// ─────────────────────────────────────────────
+const TARGET_W = 85.0;
+const CUR_W    = 93.6;
+const HEIGHT_M = 1.84;
+const START_W  = 101.2; // historical start for progress calc
+
+const DATA = {
+  day: {
+    labels:  ['06:00','08:00','10:14'],
+    weights: [93.8, 93.7, 93.6],
+    nullFrom: 3,          // fill nulls after index
+    totalLabels: ['06:00','08:00','10:14','12:00','14:00','16:00','18:00'],
+    totalW: [93.8,93.7,93.6,null,null,null,null],
+    avg: 93.7, min: 93.6, max: 93.8,
+    period: 'сегодня', sub: 'Последнее значение',
+    delta: +0.60, deltaVs: 'к вчера', lastTime: 'сегодня, 10:14',
+  },
+  week: {
+    labels:  ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'],
+    weights: [94.2, 93.8, 94.1, 93.9, 93.8, 94.0, 93.6],
+    avg: 93.9, min: 93.6, max: 94.2,
+    period: 'май: неделя', sub: 'Среднее за неделю',
+    delta: -0.60, deltaVs: 'за неделю', lastTime: 'вчера, 19:30',
+  },
+  month: {
+    labels:  ['1 мая','2','3','4','5','6','7','8','9','10','11','12 мая'],
+    weights: [98.1, 97.6, 97.2, 96.8, 96.1, 95.7, 95.2, 94.8, 94.3, 93.9, 93.6, 93.6],
+    avg: 95.6, min: 93.6, max: 98.1,
+    period: 'май: месяц', sub: 'Среднее за месяц',
+    delta: -4.50, deltaVs: 'за месяц', lastTime: 'вчера, 19:30',
+  },
+  year: {
+    labels:  ['Янв','Фев','Мар','Апр','Май'],
+    weights: [101.2, 100.4, 98.9, 96.5, 93.9],
+    avg: 98.2, min: 93.9, max: 101.2,
+    period: '2025: год', sub: 'Среднее за год',
+    delta: -7.30, deltaVs: 'за год', lastTime: 'вчера, 19:30',
+  },
+};
+
+// ─────────────────────────────────────────────
+// Header date
+// ─────────────────────────────────────────────
+const MONTHS = ['января','февраля','марта','апреля','мая','июня',
+                'июля','августа','сентября','октября','ноября','декабря'];
+const D = new Date();
+document.getElementById('hdr-date').textContent =
+  `${D.getDate()} ${MONTHS[D.getMonth()]} ${D.getFullYear()}`;
+
+// ─────────────────────────────────────────────
+// Chart.js setup
+// ─────────────────────────────────────────────
+const ctx = document.getElementById('wChart').getContext('2d');
+
+// Gradient fill factory
+let cachedGrad = null;
+function makeGrad(chartCtx, area) {
+  const g = chartCtx.createLinearGradient(0, area.top, 0, area.bottom);
+  g.addColorStop(0,   'rgba(34,211,238,0.20)');
+  g.addColorStop(0.55,'rgba(34,211,238,0.05)');
+  g.addColorStop(1,   'rgba(34,211,238,0.00)');
+  return g;
+}
+
+// Target-line plugin
+const targetPlugin = {
+  id: 'targetLine',
+  afterDraw(chart) {
+    const { ctx: c, chartArea: a, scales } = chart;
+    if (!scales.y) return;
+    const y = scales.y.getPixelForValue(TARGET_W);
+    if (y < a.top || y > a.bottom) return;
+
+    c.save();
+    // dashed line
+    c.setLineDash([5,5]);
+    c.strokeStyle = 'rgba(245,158,11,0.55)';
+    c.lineWidth = 1.4;
+    c.beginPath(); c.moveTo(a.left, y); c.lineTo(a.right, y); c.stroke();
+    c.setLineDash([]);
+
+    // label badge on right
+    const txt  = `Цель · ${TARGET_W} кг`;
+    c.font = '500 10.5px Inter, system-ui, sans-serif';
+    const tw = c.measureText(txt).width;
+    const bx = a.right - tw - 18, by = y - 12, bw = tw + 14, bh = 18;
+    c.fillStyle = 'rgba(245,158,11,0.12)';
+    roundRect(c, bx, by, bw, bh, 5);
+    c.fill();
+    c.fillStyle = 'rgba(245,158,11,0.90)';
+    c.fillText(txt, bx + 7, y + 4);
+    c.restore();
+  }
+};
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x+r, y);
+  c.lineTo(x+w-r, y); c.quadraticCurveTo(x+w, y, x+w, y+r);
+  c.lineTo(x+w, y+h-r); c.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  c.lineTo(x+r, y+h); c.quadraticCurveTo(x, y+h, x, y+h-r);
+  c.lineTo(x, y+r); c.quadraticCurveTo(x, y, x+r, y);
+  c.closePath();
+}
+
+Chart.register(targetPlugin);
+
+// Chart instance
+const wChart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels:   DATA.week.labels,
+    datasets: [{
+      data: DATA.week.weights,
+      borderColor: '#22D3EE',
+      borderWidth: 2.5,
+      backgroundColor: ctx2 => {
+        const ch = ctx2.chart;
+        if (!ch.chartArea) return 'transparent';
+        if (!cachedGrad) cachedGrad = makeGrad(ch.ctx, ch.chartArea);
+        return cachedGrad;
+      },
+      fill: true,
+      tension: 0.42,
+      pointBackgroundColor: '#22D3EE',
+      pointBorderColor: '#101828',
+      pointBorderWidth: 2.5,
+      pointRadius: 5,
+      pointHoverRadius: 7,
+      pointHoverBackgroundColor: '#22D3EE',
+      pointHoverBorderColor: '#fff',
+      pointHoverBorderWidth: 2,
+      spanGaps: false,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 480, easing: 'easeInOutQuart' },
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    scales: {
+      x: {
+        grid: { display: false },
+        border: { display: false },
+        ticks: {
+          color: 'rgba(255,255,255,0.28)',
+          font: { size: 10.5, family: 'Inter,system-ui,sans-serif', weight: '500' },
+          maxRotation: 0, maxTicksLimit: 7,
+        }
+      },
+      y: {
+        position: 'right',
+        grid: { color: 'rgba(255,255,255,0.045)', lineWidth: 1 },
+        border: { display: false },
+        ticks: {
+          color: 'rgba(255,255,255,0.28)',
+          font: { size: 10, family: 'Inter,system-ui,sans-serif' },
+          maxTicksLimit: 5,
+          callback: v => v % 1 === 0 ? v : v.toFixed(0),
+        },
+        min: 82,
+      }
+    },
+    onHover: handleHover,
+  }
+});
+
+// ─────────────────────────────────────────────
+// Custom tooltip
+// ─────────────────────────────────────────────
+let activePeriod = 'week';
+
+function handleHover(evt, els) {
+  const tt = document.getElementById('ctt');
+  if (!els.length) { tt.classList.remove('show'); return; }
+  const i = els[0].index;
+  const d = DATA[activePeriod];
+  const w = (d.totalW || d.weights)[i];
+  if (w === null || w === undefined) { tt.classList.remove('show'); return; }
+
+  tt.classList.add('show');
+  document.getElementById('ctt-lbl').textContent = (d.totalLabels || d.labels)[i];
+  document.getElementById('ctt-val').textContent  = w.toFixed(1) + ' кг';
+
+  const meta  = wChart.getDatasetMeta(0);
+  const point = meta.data[i];
+  if (!point) return;
+  tt.style.left = point.x + 'px';
+  tt.style.top  = (point.y - 14) + 'px';
+}
+
+// ─────────────────────────────────────────────
+// Update UI
+// ─────────────────────────────────────────────
+function updateUI(period) {
+  activePeriod = period;
+  const d = DATA[period];
+  cachedGrad = null;
+
+  // chart data
+  const labels  = d.totalLabels  || d.labels;
+  const weights = d.totalW || d.weights;
+  wChart.data.labels = labels;
+  wChart.data.datasets[0].data = weights;
+
+  // y-axis range
+  const valid = weights.filter(v => v !== null);
+  const lo = Math.min(...valid, TARGET_W);
+  const hi = Math.max(...valid);
+  const pad = Math.max((hi - lo) * 0.18, 1.5);
+  wChart.options.scales.y.min = Math.floor(lo - pad - 0.5);
+  wChart.options.scales.y.max = Math.ceil(hi  + pad);
+
+  wChart.update();
+
+  // period label
+  document.getElementById('period-lbl').textContent = d.period;
+
+  // avg
+  document.getElementById('avg-num').innerHTML = d.avg.toFixed(1) + '<sup>кг</sup>';
+  document.getElementById('avg-sub').textContent = d.sub;
+
+  // delta pill
+  const sign = d.delta > 0 ? '+' : '';
+  const pill = document.getElementById('delta-pill');
+  pill.textContent = sign + d.delta.toFixed(2);
+  pill.className = 'delta-pill ' + (d.delta > 0 ? 'up' : d.delta < 0 ? 'down' : 'zero');
+  document.getElementById('delta-vs').textContent = d.deltaVs;
+
+  // last weight (always current)
+  document.getElementById('last-w').textContent = CUR_W.toFixed(1) + ' кг';
+
+  // stats
+  document.getElementById('s-min').textContent = d.min.toFixed(1);
+  document.getElementById('s-max').textContent = d.max.toFixed(1);
+  const v = weights.filter(x => x !== null);
+  const chg = v[v.length-1] - v[0];
+  const sc = document.getElementById('s-chg');
+  sc.textContent = (chg > 0 ? '+' : '') + chg.toFixed(1);
+  sc.style.color = chg > 0 ? 'var(--danger)' : chg < 0 ? 'var(--success)' : 'var(--text2)';
+
+  // goal progress
+  const totalDist = START_W - TARGET_W;
+  const covered   = START_W - CUR_W;
+  const pct = Math.min(Math.round(covered / totalDist * 100), 100);
+  document.getElementById('g-fill').style.width = pct + '%';
+  document.getElementById('g-pct').textContent  = pct + '%';
+  document.getElementById('t-rem').textContent  = 'осталось ' + (CUR_W - TARGET_W).toFixed(1) + ' кг';
+
+  // last measurement
+  const ld = document.getElementById('last-delta');
+  const ds = d.delta > 0 ? '+' : '';
+  ld.textContent = ds + d.delta.toFixed(2) + ' ' + d.deltaVs;
+  ld.style.color = d.delta > 0 ? 'var(--danger)' : 'var(--success)';
+  document.getElementById('last-time').textContent = d.lastTime;
+}
+
+// ─────────────────────────────────────────────
+// BMI
+// ─────────────────────────────────────────────
+(function initBMI() {
+  const bmi = CUR_W / (HEIGHT_M * HEIGHT_M);
+  document.getElementById('bmi-v').innerHTML =
+    bmi.toFixed(1) + '<span class="ic-unit"></span>';
+  const cat = bmi < 18.5 ? 'Дефицит веса'
+            : bmi < 25   ? 'Норма'
+            : bmi < 30   ? 'Избыточный вес'
+            : 'Ожирение';
+  document.getElementById('bmi-cat').textContent = cat;
+  // map bmi 15-35 → 0-100%
+  const pct = Math.min(Math.max((bmi - 15) / 20 * 100, 0), 100);
+  document.getElementById('bmi-m').style.left = pct + '%';
+})();
+
+// ─────────────────────────────────────────────
+// Tabs
+// ─────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('ctt').classList.remove('show');
+    updateUI(btn.dataset.p);
+  });
+});
+
+// ── Boot ──
+updateUI('week');
+</script>
+</body>
+</html>

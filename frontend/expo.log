@@ -1,0 +1,159 @@
+Android Bundled 19579ms node_modules\expo-router\entry.js (1344 modules)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [AuthRetryableFetchError: Network request failed] 
+
+Call Stack
+  construct (<native>)
+  apply (<native>)
+  _construct (node_modules\@babel\runtime\helpers\construct.js)
+  Wrapper (node_modules\@babel\runtime\helpers\wrapNativeSuper.js)
+  construct (<native>)
+  _callSuper (node_modules\@babel\runtime\helpers\callSuper.js)
+  AuthError#constructor (node_modules\@supabase\auth-js\dist\main\lib\errors.js)
+  construct (<native>)
+  _callSuper (node_modules\@babel\runtime\helpers\callSuper.js)
+  CustomAuthError#constructor (node_modules\@supabase\auth-js\dist\main\lib\errors.js)
+  construct (<native>)
+  _callSuper (node_modules\@babel\runtime\helpers\callSuper.js)
+  AuthRetryableFetchError#constructor (node_modules\@supabase\auth-js\dist\main\lib\errors.js)
+  _handleRequest (node_modules\@supabase\auth-js\dist\main\lib\fetch.js)
+  throw (<native>)
+  asyncGeneratorStep (node_modules\@babel\runtime\helpers\asyncToGenerator.js)
+  _throw (node_modules\@babel\runtime\helpers\asyncToGenerator.js)
+  tryCallOne (address at (InternalBytecode.js:1:1180)
+  anonymous (address at (InternalBytecode.js:1:1874)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [AuthRetryableFetchError: Network request failed] 
+
+Call Stack
+  construct (<native>)
+  apply (<native>)
+  _construct (node_modules\@babel\runtime\helpers\construct.js)
+  Wrapper (node_modules\@babel\runtime\helpers\wrapNativeSuper.js)
+  construct (<native>)
+  _callSuper (node_modules\@babel\runtime\helpers\callSuper.js)
+  AuthError#constructor (node_modules\@supabase\auth-js\dist\main\lib\errors.js)
+  construct (<native>)
+  _callSuper (node_modules\@babel\runtime\helpers\callSuper.js)
+  CustomAuthError#constructor (node_modules\@supabase\auth-js\dist\main\lib\errors.js)
+  construct (<native>)
+  _callSuper (node_modules\@babel\runtime\helpers\callSuper.js)
+  AuthRetryableFetchError#constructor (node_modules\@supabase\auth-js\dist\main\lib\errors.js)
+  _handleRequest (node_modules\@supabase\auth-js\dist\main\lib\fetch.js)
+  throw (<native>)
+  asyncGeneratorStep (node_modules\@babel\runtime\helpers\asyncToGenerator.js)
+  _throw (node_modules\@babel\runtime\helpers\asyncToGenerator.js)
+  tryCallOne (address at (InternalBytecode.js:1:1180)
+  anonymous (address at (InternalBytecode.js:1:1874)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [TypeError: Network request failed] 
+
+Call Stack
+  setTimeout$argument_0 (node_modules\whatwg-fetch\dist\fetch.umd.js)
+ ERROR  [AuthRetryableFetchError: Network request failed] 
+
+Call Stack
+  construct (<native>)
+  apply (<native>)
+  _construct (node_modules\@babel\runtime\helpers\construct.js)
+  Wrapper (node_modules\@babel\runtime\helpers\wrapNativeSuper.js)
+  construct (<native>)
+  _callSuper (node_modules\@babel\runtime\helpers\callSuper.js)
+  AuthError#constructor (node_modules\@supabase\auth-js\dist\main\lib\errors.js)
+  construct (<native>)
+  _callSuper (node_modules\@babel\runtime\helpers\callSuper.js)
+  CustomAuthError#constructor (node_modules\@supabase\auth-js\dist\main\lib\errors.js)
+  construct (<native>)
+  _callSuper (node_modules\@babel\runtime\helpers\callSuper.js)
+  AuthRetryableFetchError#constructor (node_modules\@supabase\auth-js\dist\main\lib\errors.js)
+  _handleRequest (node_modules\@supabase\auth-js\dist\main\lib\fetch.js)
+  throw (<native>)
+  asyncGeneratorStep (node_modules\@babel\runtime\helpers\asyncToGenerator.js)
+  _throw (node_modules\@babel\runtime\helpers\callSuper.js)
+  tryCallOne (address at (InternalBytecode.js:1:1180)
+  anonymous (address at (InternalBytecode.js:1:1874)

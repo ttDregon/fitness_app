@@ -1,10 +1,14 @@
 import json
+import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from supabase import create_client, Client
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -17,7 +21,7 @@ app.add_middleware(
 )
 
 # --- НАСТРОЙКИ DEEPSEEK ---
-DEEPSEEK_API_KEY = "sk-e73ce0d4b49a46779678bbdbf71342f0"
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-e73ce0d4b49a46779678bbdbf71342f0")
 
 client = OpenAI(
     api_key=DEEPSEEK_API_KEY,
@@ -25,8 +29,8 @@ client = OpenAI(
 )
 
 # --- НАСТРОЙКИ SUPABASE ---
-SUPABASE_URL = "https://izhkutjiuimsepzlohsl.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml6aGt1dGppdWltc2VwemxvaHNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1ODI3NzksImV4cCI6MjA5MjE1ODc3OX0.ZR0HPdjhkrTeEeJ1F0cmqLgNV1AsxJb6pssIQtrlGeg"
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://izhkutjiuimsepzlohsl.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml6aGt1dGppdWltc2VwemxvaHNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1ODI3NzksImV4cCI6MjA5MjE1ODc3OX0.ZR0HPdjhkrTeEeJ1F0cmqLgNV1AsxJb6pssIQtrlGeg")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 

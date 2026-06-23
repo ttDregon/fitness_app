@@ -1,0 +1,7 @@
+.venv/
+backend/.env
+backend/__pycache__/
+backend/node_modules/
+frontend/node_modules/
+frontend/android/
+comabds.txt

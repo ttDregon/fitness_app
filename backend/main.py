@@ -141,6 +141,51 @@ async def parse_meal(data: dict):
         return {"error": str(e)}
 
 
+@app.post("/parse_meals")
+async def parse_meals(data: dict):
+    text = data.get("text", "")
+
+    prompt = f"""
+    Проанализируй, что съел человек или что назначено в меню: "{text}".
+
+    1) Раздели на ПРИЁМЫ ПИЩИ по словам-маркерам:
+       завтрак -> "breakfast", обед -> "lunch", ужин -> "dinner", перекус -> "snack".
+       Если маркеров нет — верни ОДИН приём с meal_type "snack".
+    2) Внутри каждого приёма раздели текст на ОТДЕЛЬНЫЕ продукты.
+       Например "200г куриного филе, 150г пюре, огурец и стакан сока" = 4 продукта.
+       Для КАЖДОГО продукта оцени КБЖУ отдельно. В name сохраняй количество ("200г куриного филе").
+
+    Верни ТОЛЬКО валидный JSON без markdown и комментариев, строго такой формат:
+    {{
+      "meals": [
+        {{
+          "meal_type": "breakfast",
+          "items": [
+            {{ "name": "200г куриного филе", "calories": 330, "protein": 62, "fat": 7, "carbs": 0 }}
+          ]
+        }}
+      ]
+    }}
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "You output valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2
+        )
+        raw = response.choices[0].message.content
+        cleaned = re.sub(r'```json|```', '', raw).strip()
+        parsed = json.loads(cleaned)
+        return {"meals": parsed.get("meals", [])}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.post("/calculate_loss")
 async def calculate_loss(payload: WorkoutLossPayload):
     print(f"\n--- РАСЧЕТ СОЖЖЕННЫХ КАЛОРИЙ ЧЕРЕЗ ЧАС ---")

@@ -33,6 +33,17 @@ export async function parseMeal(text: string): Promise<any> {
   return response.json();
 }
 
+// Разбор питания на приёмы и продукты -> { meals: [{ meal_type, items: [{name,calories,protein,fat,carbs}] }] }
+export async function parseMeals(text: string): Promise<any> {
+  const response = await fetch(`${getBackendUrl()}/parse_meals`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!response.ok) throw new Error(`Ошибка сервера: статус ${response.status}`);
+  return response.json();
+}
+
 // Расчёт сожжённых калорий -> { burned_kcal, weight_loss_kg }
 export async function calculateLoss(weight: number, exercises: WorkoutData[]): Promise<any> {
   const response = await fetch(`${getBackendUrl()}/calculate_loss`, {

@@ -5,11 +5,11 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { styles } from '../styles';
 import { COLORS } from '../theme';
 import { supabase } from '../lib/supabase';
-import { parseMeal } from '../api/backend';
+import { parseMeals } from '../api/backend';
 import { groupWorkoutData } from '../utils/workout';
 import { getCurrentDateString } from '../utils/date';
 import { useApp } from '../context/AppContext';
-import type { WorkoutData, GroupedWorkout, MealItem, MealLogRow } from '../types';
+import type { WorkoutData, GroupedWorkout, MealItem, MealLogRow, FoodItem } from '../types';
 
 const PERIODS = [
   { key: 'day', label: 'День', days: 1 },
@@ -17,6 +17,17 @@ const PERIODS = [
   { key: 'week', label: 'Неделя', days: 7 },
   { key: 'month', label: 'Месяц', days: 30 },
 ];
+
+const MEAL_TYPES = [
+  { key: 'breakfast', label: 'Завтрак' },
+  { key: 'lunch', label: 'Обед' },
+  { key: 'dinner', label: 'Ужин' },
+  { key: 'snack', label: 'Перекус' },
+];
+const mealTypeLabel = (t?: string) => MEAL_TYPES.find(x => x.key === t)?.label || 'Приём пищи';
+// Совместимость со старыми записями без разбивки на продукты.
+const asItems = (m: { items?: FoodItem[]; name: string; calories: number; protein: number; fat: number; carbs: number }): FoodItem[] =>
+  m.items && m.items.length > 0 ? m.items : [{ name: m.name, calories: m.calories, protein: m.protein, fat: m.fat, carbs: m.carbs }];
 
 const addDays = (base: string, n: number) => {
   const [y, m, d] = base.split('-').map(Number);
@@ -46,6 +57,8 @@ export default function ClientPlanModal() {
   const [startPickerVisible, setStartPickerVisible] = useState<boolean>(false);
   const [dayIndex, setDayIndex] = useState<number>(0);
   const [mealInput, setMealInput] = useState<string>('');
+  const [mealType, setMealType] = useState<string>('breakfast');
+  const [mealTypeOpen, setMealTypeOpen] = useState<boolean>(false);
   const [mealPreview, setMealPreview] = useState<MealItem | null>(null);
   const [mealPreviewLoading, setMealPreviewLoading] = useState<boolean>(false);
   const [dayMeals, setDayMeals] = useState<MealItem[]>([]);
@@ -80,9 +93,12 @@ export default function ClientPlanModal() {
     if (!mealInput.trim()) return;
     setMealPreviewLoading(true);
     try {
-      const data = await parseMeal(mealInput);
-      if (!data || data.error || data.name === undefined || data.calories === undefined) throw new Error(data?.error || 'ИИ вернул данные в неверном формате');
-      setMealPreview({ id: `meal_${Date.now()}`, name: data.name, calories: data.calories || 0, protein: data.protein || 0, fat: data.fat || 0, carbs: data.carbs || 0, eaten: false });
+      const data = await parseMeals(mealInput);
+      if (!data || data.error || !Array.isArray(data.meals)) throw new Error(data?.error || 'ИИ вернул данные в неверном формате');
+      const items: FoodItem[] = data.meals.flatMap((meal: any) => (meal.items || []).map((it: any) => ({ name: it.name || 'блюдо', calories: it.calories || 0, protein: it.protein || 0, fat: it.fat || 0, carbs: it.carbs || 0 })));
+      if (items.length === 0) throw new Error('Не удалось распознать продукты');
+      const t = items.reduce((a, i) => ({ c: a.c + i.calories, p: a.p + i.protein, f: a.f + i.fat, cb: a.cb + i.carbs }), { c: 0, p: 0, f: 0, cb: 0 });
+      setMealPreview({ id: `meal_${Date.now()}`, meal_type: mealType, name: items.map(i => i.name).join(', '), items, calories: t.c, protein: t.p, fat: t.f, carbs: t.cb, eaten: false });
     } catch (e: any) {
       Alert.alert('Ошибка', e.message);
     } finally {
@@ -208,21 +224,41 @@ export default function ClientPlanModal() {
                   </View>
                 )}
 
-                {/* Ввод блюда */}
-                <Text style={[styles.label, { marginTop: 8 }]}>Добавить блюдо на {fmtDate(nutritionDate)}:</Text>
-                <TextInput style={styles.inputArea} multiline placeholder="200г куриной грудки и рис..." placeholderTextColor={COLORS.textSecondary} value={mealInput} onChangeText={setMealInput} />
+                {/* Приём пищи — выпадающий список */}
+                <Text style={[styles.label, { marginTop: 8 }]}>Приём пищи:</Text>
+                <TouchableOpacity style={styles.pickerButton} onPress={() => setMealTypeOpen(o => !o)}>
+                  <Ionicons name="restaurant-outline" size={20} color={COLORS.tabBar} />
+                  <Text style={[styles.pickerButtonText, { flex: 1 }]}>{mealTypeLabel(mealType)}</Text>
+                  <Ionicons name={mealTypeOpen ? 'chevron-up' : 'chevron-down'} size={20} color={COLORS.tabBar} />
+                </TouchableOpacity>
+                {mealTypeOpen && (
+                  <View style={{ backgroundColor: COLORS.bg, borderRadius: 12, marginTop: 4, marginBottom: 4, overflow: 'hidden' }}>
+                    {MEAL_TYPES.map(mt => (
+                      <TouchableOpacity key={mt.key} onPress={() => { setMealType(mt.key); setMealTypeOpen(false); }} style={{ paddingVertical: 12, paddingHorizontal: 16, backgroundColor: mealType === mt.key ? 'rgba(139,92,246,0.15)' : 'transparent' }}>
+                        <Text style={{ color: mealType === mt.key ? COLORS.tabBar : COLORS.textPrimary, fontSize: 15, fontWeight: mealType === mt.key ? '700' : '500' }}>{mt.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
+                {/* Состав приёма */}
+                <Text style={[styles.label, { marginTop: 10 }]}>Что в приёме (через запятую):</Text>
+                <TextInput style={styles.inputArea} multiline placeholder="200г куриного филе, 150г пюре, огурец, сок..." placeholderTextColor={COLORS.textSecondary} value={mealInput} onChangeText={setMealInput} />
                 <TouchableOpacity style={[styles.button, { marginBottom: 14 }]} onPress={calcPreview} disabled={mealPreviewLoading}>{mealPreviewLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Рассчитать КБЖУ</Text>}</TouchableOpacity>
 
                 {mealPreview && (
                   <View style={styles.previewContainer}>
-                    <Text style={styles.previewTitle}>{mealPreview.name}</Text>
-                    <Text style={styles.previewCals}>{mealPreview.calories} ккал</Text>
-                    <View style={styles.previewMacrosRow}>
-                      <View style={styles.previewMacro}><Text style={{ color: COLORS.protein, fontWeight: 'bold', marginBottom: 4 }}>Белки</Text><Text style={{ color: COLORS.textPrimary }}>{mealPreview.protein} г</Text></View>
-                      <View style={styles.previewMacro}><Text style={{ color: COLORS.fat, fontWeight: 'bold', marginBottom: 4 }}>Жиры</Text><Text style={{ color: COLORS.textPrimary }}>{mealPreview.fat} г</Text></View>
-                      <View style={styles.previewMacro}><Text style={{ color: COLORS.carb, fontWeight: 'bold', marginBottom: 4 }}>Углеводы</Text><Text style={{ color: COLORS.textPrimary }}>{mealPreview.carbs} г</Text></View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text style={styles.previewTitle}>{mealTypeLabel(mealPreview.meal_type)}</Text>
+                      <Text style={styles.previewCals}>{mealPreview.calories} ккал</Text>
                     </View>
-                    <TouchableOpacity style={[styles.button, { marginTop: 18 }]} onPress={addMeal}><Text style={styles.buttonText}>Добавить в меню</Text></TouchableOpacity>
+                    {(mealPreview.items || []).map((it: FoodItem, i: number) => (
+                      <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
+                        <Text style={{ color: COLORS.textPrimary, fontSize: 13, flex: 1, marginRight: 8 }}>{it.name}</Text>
+                        <Text style={{ color: COLORS.textSecondary, fontSize: 12 }}>{it.calories} ккал · Б{it.protein} Ж{it.fat} У{it.carbs}</Text>
+                      </View>
+                    ))}
+                    <TouchableOpacity style={[styles.button, { marginTop: 14 }]} onPress={addMeal}><Text style={styles.buttonText}>Добавить в меню</Text></TouchableOpacity>
                   </View>
                 )}
 
@@ -233,13 +269,19 @@ export default function ClientPlanModal() {
                 ) : (
                   <>
                     {dayMeals.map(m => (
-                      <View key={m.id} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bg, borderRadius: 14, padding: 14, marginBottom: 8 }}>
-                        <Ionicons name={m.eaten ? 'checkmark-circle' : 'ellipse-outline'} size={24} color={m.eaten ? COLORS.success : COLORS.textSecondary} style={{ marginRight: 10 }} />
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ color: COLORS.textPrimary, fontSize: 15, fontWeight: '600' }}>{m.name}</Text>
-                          <Text style={{ color: COLORS.textSecondary, fontSize: 12, marginTop: 2 }}>{m.calories} ккал · Б{m.protein} Ж{m.fat} У{m.carbs}{m.eaten ? '  · съедено' : ''}</Text>
+                      <View key={m.id} style={{ backgroundColor: COLORS.bg, borderRadius: 14, padding: 14, marginBottom: 8 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Ionicons name={m.eaten ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={m.eaten ? COLORS.success : COLORS.textSecondary} style={{ marginRight: 10 }} />
+                          <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 15, fontWeight: '700' }}>{mealTypeLabel(m.meal_type)}{m.eaten ? ' · съедено' : ''}</Text>
+                          <Text style={{ color: COLORS.textSecondary, fontSize: 12, marginRight: 8 }}>{m.calories} ккал</Text>
+                          <TouchableOpacity onPress={() => removeMeal(m.id)} style={{ padding: 4 }}><Ionicons name="trash-outline" size={20} color={COLORS.error} /></TouchableOpacity>
                         </View>
-                        <TouchableOpacity onPress={() => removeMeal(m.id)} style={{ padding: 4 }}><Ionicons name="trash-outline" size={20} color={COLORS.error} /></TouchableOpacity>
+                        {asItems(m).map((it: FoodItem, i: number) => (
+                          <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 32, paddingTop: 4 }}>
+                            <Text style={{ color: COLORS.textPrimary, fontSize: 13, flex: 1, marginRight: 8 }}>{it.name}</Text>
+                            <Text style={{ color: COLORS.textSecondary, fontSize: 12 }}>{it.calories} ккал · Б{it.protein} Ж{it.fat} У{it.carbs}</Text>
+                          </View>
+                        ))}
                       </View>
                     ))}
                     <Text style={{ color: COLORS.textSecondary, fontSize: 13, fontWeight: '700', marginTop: 4 }}>Итого: {totals.cal} ккал · Б{totals.p} / Ж{totals.f} / У{totals.c}</Text>
@@ -251,10 +293,18 @@ export default function ClientPlanModal() {
                   <View style={{ marginTop: 16 }}>
                     <Text style={styles.historyTitle}>Клиент записал сам:</Text>
                     {eatenLog.map(e => (
-                      <View key={e.id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)' }}>
-                        <Ionicons name="fast-food-outline" size={18} color={COLORS.tabBar} style={{ marginRight: 10 }} />
-                        <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 14 }}>{e.name}</Text>
-                        <Text style={{ color: COLORS.textSecondary, fontSize: 13 }}>{e.calories} ккал</Text>
+                      <View key={e.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Ionicons name="fast-food-outline" size={18} color={COLORS.tabBar} style={{ marginRight: 8 }} />
+                          <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 14, fontWeight: '700' }}>{mealTypeLabel(e.meal_type)}</Text>
+                          <Text style={{ color: COLORS.textSecondary, fontSize: 13 }}>{e.calories} ккал</Text>
+                        </View>
+                        {asItems(e).map((it: FoodItem, i: number) => (
+                          <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingLeft: 26, paddingTop: 3 }}>
+                            <Text style={{ color: COLORS.textPrimary, fontSize: 13, flex: 1, marginRight: 8 }}>{it.name}</Text>
+                            <Text style={{ color: COLORS.textSecondary, fontSize: 12 }}>{it.calories} ккал</Text>
+                          </View>
+                        ))}
                       </View>
                     ))}
                   </View>

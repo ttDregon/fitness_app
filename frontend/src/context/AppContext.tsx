@@ -3,10 +3,11 @@ import { Platform, Alert, Animated, Easing, LayoutAnimation, ScrollView } from '
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { getCurrentDateString } from '../utils/date';
-import { parseWorkout, parseMeal, calculateLoss, sendChat, getBackendUrl } from '../api/backend';
+import { parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl } from '../api/backend';
 import type {
   Session, WorkoutData, SavedAccount, Group, GroupMember, WeightLog,
   WorkoutRecord, AssignedWorkout, TrainingSession, ChatMessage, ChatSession, Macros, MealPreview,
+  MealItem, MealLogRow, FoodItem,
 } from '../types';
 
 function useAppController() {
@@ -55,7 +56,9 @@ function useAppController() {
 
   const [isMealModalVisible, setIsMealModalVisible] = useState<boolean>(false);
   const [isMealPreviewLoading, setIsMealPreviewLoading] = useState<boolean>(false);
-  const [mealPreview, setMealPreview] = useState<MealPreview | null>(null);
+  const [assignedMealsToday, setAssignedMealsToday] = useState<MealItem[]>([]); // меню от тренера на сегодня (вид клиента)
+  const [selfMealsToday, setSelfMealsToday] = useState<MealLogRow[]>([]);       // что клиент записал сам за сегодня
+  const [mealParse, setMealParse] = useState<MealItem[] | null>(null); // распарсенные приёмы для предпросмотра (клиент)
 
   const [lastActivityTime, setLastActivityTime] = useState<number | null>(null);
   const [pendingExerciseCount, setPendingExerciseCount] = useState<number>(0);
@@ -254,7 +257,7 @@ function useAppController() {
 
   useEffect(() => {
     if (session) {
-      loadHistory(); fetchGroups(); fetchUpcomingSessions(); fetchUserProfileData(); fetchWeightLog(); loadTodayNutritionData();
+      loadHistory(); fetchGroups(); fetchUpcomingSessions(); fetchUserProfileData(); fetchWeightLog(); loadTodayNutritionData(); loadClientNutrition();
       const loadPending = async () => {
         try {
           if (Platform.OS !== 'web') {
@@ -371,6 +374,35 @@ function useAppController() {
     const val = JSON.stringify({ calories: cals, protein: p, fat: f, carbs: c });
     if (Platform.OS !== 'web') await AsyncStorage.setItem(key, val);
     else if (typeof window !== 'undefined') window.localStorage.setItem(key, val);
+  };
+
+  // Питание клиента из БД: меню от тренера на сегодня (assigned_meals) + что он записал сам (meal_log).
+  const loadClientNutrition = async () => {
+    if (!session?.user?.id) return;
+    const today = getCurrentDateString();
+    const { data: am } = await supabase.from('assigned_meals').select('meal_data').eq('client_id', session.user.id).eq('date', today).maybeSingle();
+    setAssignedMealsToday((am?.meal_data as MealItem[]) || []);
+    const { data: ml } = await supabase.from('meal_log').select('*').eq('user_id', session.user.id).eq('date', today).order('created_at', { ascending: true });
+    setSelfMealsToday((ml as MealLogRow[]) || []);
+  };
+
+  // Клиент отмечает блюдо из плана как съеденное: пишем eaten в assigned_meals (видит тренер)
+  // и двигаем дневные итоги КБЖУ на величину блюда.
+  const toggleAssignedMealEaten = async (mealId: string) => {
+    if (!session?.user?.id) return;
+    const target = assignedMealsToday.find(m => m.id === mealId);
+    if (!target) return;
+    const nowEaten = !target.eaten;
+    const updated = assignedMealsToday.map(m => m.id === mealId ? { ...m, eaten: nowEaten } : m);
+    setAssignedMealsToday(updated);
+    const sign = nowEaten ? 1 : -1;
+    saveNutritionDataLocally(
+      Math.max(0, consumedCalories + sign * target.calories),
+      Math.max(0, consumedMacros.protein + sign * target.protein),
+      Math.max(0, consumedMacros.fat + sign * target.fat),
+      Math.max(0, consumedMacros.carb + sign * target.carbs)
+    );
+    await supabase.from('assigned_meals').update({ meal_data: updated }).eq('client_id', session.user.id).eq('date', getCurrentDateString());
   };
 
   const fetchUserProfileData = async () => {
@@ -888,35 +920,38 @@ function useAppController() {
     } catch (e: any) { Alert.alert('Ошибка связи', e.message); return false; } finally { setIsLoading(false); }
   };
 
-  const handleCalculateMealPreview = async (mealText: string) => {
-    if (!mealText.trim()) return;
+  // Клиент пишет «на завтрак..., на обед..., на ужин...» — делим на приёмы, каждый на продукты с КБЖУ.
+  const calcClientMeals = async (text: string) => {
+    if (!text.trim()) return;
     setIsMealPreviewLoading(true);
     try {
-      const data = await parseMeal(mealText);
-
-      // Проверяем, вернул ли ИИ правильные данные
-      if (!data.name || data.calories === undefined) {
-        throw new Error('ИИ вернул данные в неверном формате');
-      }
-
-      smoothStateUpdate(() => setMealPreview(data));
+      const data = await parseMeals(text);
+      if (!data || data.error || !Array.isArray(data.meals)) throw new Error(data?.error || 'ИИ вернул данные в неверном формате');
+      const meals: MealItem[] = data.meals.map((meal: any, mi: number) => {
+        const items: FoodItem[] = (meal.items || []).map((it: any) => ({ name: it.name || 'блюдо', calories: it.calories || 0, protein: it.protein || 0, fat: it.fat || 0, carbs: it.carbs || 0 }));
+        const t = items.reduce((a, i) => ({ c: a.c + i.calories, p: a.p + i.protein, f: a.f + i.fat, cb: a.cb + i.carbs }), { c: 0, p: 0, f: 0, cb: 0 });
+        return { id: `meal_${Date.now()}_${mi}`, meal_type: meal.meal_type || 'snack', name: items.map(i => i.name).join(', '), items, calories: t.c, protein: t.p, fat: t.f, carbs: t.cb, eaten: false };
+      });
+      smoothStateUpdate(() => setMealParse(meals));
     } catch (e: any) {
-      Alert.alert('Ошибка', e.message); // Теперь мы увидим реальную причину!
+      Alert.alert('Ошибка', e.message);
     } finally {
       setIsMealPreviewLoading(false);
     }
   };
 
-  const confirmAddMeal = () => {
-    if (!mealPreview) return;
-    saveNutritionDataLocally(
-      consumedCalories + mealPreview.calories,
-      consumedMacros.protein + mealPreview.protein,
-      consumedMacros.fat + mealPreview.fat,
-      consumedMacros.carb + mealPreview.carbs
-    );
+  const confirmClientMeals = () => {
+    if (!mealParse || mealParse.length === 0) return;
+    const grand = mealParse.reduce((a, m) => ({ c: a.c + m.calories, p: a.p + m.protein, f: a.f + m.fat, cb: a.cb + m.carbs }), { c: 0, p: 0, f: 0, cb: 0 });
+    saveNutritionDataLocally(consumedCalories + grand.c, consumedMacros.protein + grand.p, consumedMacros.fat + grand.f, consumedMacros.carb + grand.cb);
+    if (session?.user?.id) {
+      const uid = session.user.id;
+      const today = getCurrentDateString();
+      const rows = mealParse.map(m => ({ user_id: uid, date: today, name: m.name, meal_type: m.meal_type, items: m.items, calories: m.calories, protein: m.protein, fat: m.fat, carbs: m.carbs, source: 'self' }));
+      supabase.from('meal_log').insert(rows).then(() => loadClientNutrition());
+    }
     closeAnimatedModal(setIsMealModalVisible);
-    setMealPreview(null);
+    setMealParse(null);
   };
 
   const createNewChat = () => { smoothStateUpdate(() => { setActiveChatId(null); setIsChatSidebarVisible(false); }); };
@@ -1220,8 +1255,9 @@ function useAppController() {
     // nutrition
     dailyCalorieNorm, dailyMacros, consumedCalories, consumedMacros,
     isMealModalVisible, setIsMealModalVisible,
-    isMealPreviewLoading, mealPreview, setMealPreview,
-    handleCalculateMealPreview, confirmAddMeal,
+    isMealPreviewLoading, mealParse, setMealParse,
+    calcClientMeals, confirmClientMeals,
+    assignedMealsToday, selfMealsToday, toggleAssignedMealEaten, loadClientNutrition,
 
     // workout journal
     history, sendToAI,

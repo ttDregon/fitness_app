@@ -67,7 +67,6 @@ export default function ClubScreen() {
                 <Ionicons name="fitness-outline" size={24} color="#fff" style={{marginRight: 10}} />
                 <Text style={styles.mainActionText}>Моя тренировка</Text>
               </TouchableOpacity>
-              <Text style={styles.placeholderText}>Код клуба: {activeGroup.code}</Text>
             </View>
           )}
         </ScrollView>

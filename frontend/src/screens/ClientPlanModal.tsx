@@ -43,9 +43,18 @@ export default function ClientPlanModal() {
   const {
     selectedMember, setSelectedMember, closeAnimatedModal, modalOpacityAnim, modalScaleAnim,
     clientProfile, activeGroup, session,
-    assignNote, setAssignNote, assignWorkoutDate, assignDateObj, assignDatePickerVisible,
-    setAssignDatePickerVisible, onAssignDateChange, assignWorkoutToMember, isLoading, memberDayPlan,
+    assignNote, setAssignNote, assignWorkoutDate, setAssignWorkoutDate, assignDateObj, setAssignDateObj,
+    assignDatePickerVisible, setAssignDatePickerVisible, onAssignDateChange, assignWorkoutToMember, isLoading, memberDayPlan,
   } = useApp();
+
+  // Сдвиг даты тренировки стрелками (меняет дату → контекст подгружает план на неё).
+  const shiftAssignDate = (delta: number) => {
+    const [y, m, d] = assignWorkoutDate.split('-').map(Number);
+    const base = new Date(y, m - 1, d);
+    base.setDate(base.getDate() + delta);
+    setAssignWorkoutDate(`${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`);
+    setAssignDateObj(base);
+  };
 
   // Аккордеон: какая из двух главных секций раскрыта.
   const [activeSection, setActiveSection] = useState<'workout' | 'nutrition' | null>(null);
@@ -160,10 +169,14 @@ export default function ClientPlanModal() {
               <View style={{ marginBottom: 8 }}>
                 <Text style={styles.label}>Новая тренировка (ИИ):</Text>
                 <TextInput style={styles.inputArea} multiline placeholder="Присед 100кг 3 по 10..." placeholderTextColor={COLORS.textSecondary} value={assignNote} onChangeText={setAssignNote} />
-                <TouchableOpacity style={styles.pickerButton} onPress={() => setAssignDatePickerVisible(true)}>
-                  <Ionicons name="calendar-outline" size={20} color={COLORS.tabBar} />
-                  <Text style={styles.pickerButtonText}>Дата: {assignWorkoutDate}</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <TouchableOpacity onPress={() => shiftAssignDate(-1)} style={{ padding: 8 }}><Ionicons name="chevron-back" size={26} color={COLORS.tabBar} /></TouchableOpacity>
+                  <TouchableOpacity style={[styles.pickerButton, { flex: 1 }]} onPress={() => setAssignDatePickerVisible(true)}>
+                    <Ionicons name="calendar-outline" size={20} color={COLORS.tabBar} />
+                    <Text style={styles.pickerButtonText}>{assignWorkoutDate === getCurrentDateString() ? 'Сегодня' : assignWorkoutDate}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => shiftAssignDate(1)} style={{ padding: 8 }}><Ionicons name="chevron-forward" size={26} color={COLORS.tabBar} /></TouchableOpacity>
+                </View>
                 {assignDatePickerVisible && (
                   <DateTimePicker value={assignDateObj} mode="date" display="default" onChange={onAssignDateChange} />
                 )}

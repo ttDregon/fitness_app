@@ -185,6 +185,7 @@ function useAppController() {
          if (Platform.OS !== 'web') await AsyncStorage.setItem('lastSavedDate', today);
          else window.localStorage.setItem('lastSavedDate', today);
          loadTodayNutritionData();
+         loadTodayWater();
       }
     } catch (e) { console.log("Midnight update error", e); }
   };
@@ -257,7 +258,7 @@ function useAppController() {
 
   useEffect(() => {
     if (session) {
-      loadHistory(); fetchGroups(); fetchUpcomingSessions(); fetchUserProfileData(); fetchWeightLog(); loadTodayNutritionData(); loadClientNutrition();
+      loadHistory(); fetchGroups(); fetchUpcomingSessions(); fetchUserProfileData(); fetchWeightLog(); loadTodayNutritionData(); loadClientNutrition(); loadTodayWater();
       const loadPending = async () => {
         try {
           if (Platform.OS !== 'web') {
@@ -644,8 +645,12 @@ function useAppController() {
 
   const fetchUpcomingSessions = async () => {
     try {
+      // Роль берём из метаданных сессии (доступны сразу), а не из стейта userRole,
+      // который при перезаходе обновляется на тик позже — иначе у тренера запросится
+      // фильтр по client_id и календарь оказывается пустым.
+      const role = session?.user?.user_metadata?.role || userRole;
       let query = supabase.from('training_sessions').select('*').order('session_date', { ascending: true }).order('session_time', { ascending: true });
-      if (userRole === 'trainer') query = query.eq('trainer_id', session?.user?.id); else query = query.eq('client_id', session?.user?.id);
+      if (role === 'trainer') query = query.eq('trainer_id', session?.user?.id); else query = query.eq('client_id', session?.user?.id);
       const { data: sessions, error } = await query;
       if (error || !sessions) { setUpcomingSessions([]); return; }
       const groupIds = [...new Set(sessions.map((s: any) => s.group_id))];
@@ -921,7 +926,7 @@ function useAppController() {
   };
 
   // Клиент пишет «на завтрак..., на обед..., на ужин...» — делим на приёмы, каждый на продукты с КБЖУ.
-  const calcClientMeals = async (text: string) => {
+  const calcClientMeals = async (text: string, mealType?: string) => {
     if (!text.trim()) return;
     setIsMealPreviewLoading(true);
     try {
@@ -932,6 +937,8 @@ function useAppController() {
         const t = items.reduce((a, i) => ({ c: a.c + i.calories, p: a.p + i.protein, f: a.f + i.fat, cb: a.cb + i.carbs }), { c: 0, p: 0, f: 0, cb: 0 });
         return { id: `meal_${Date.now()}_${mi}`, meal_type: meal.meal_type || 'snack', name: items.map(i => i.name).join(', '), items, calories: t.c, protein: t.p, fat: t.f, carbs: t.cb, eaten: false };
       });
+      // Если приём один — берём выбранный в выпадающем списке; если ИИ нашёл несколько (в тексте «на завтрак…, на обед…») — уважаем его разметку.
+      if (mealType && meals.length === 1) meals[0].meal_type = mealType;
       smoothStateUpdate(() => setMealParse(meals));
     } catch (e: any) {
       Alert.alert('Ошибка', e.message);
@@ -1040,7 +1047,26 @@ function useAppController() {
     } finally { setIsChatLoading(false); }
   };
 
-  const addWater = () => { smoothStateUpdate(() => { if (waterIntake < 5.0) setWaterIntake(prev => prev + 0.2); }); };
+  // Вода в БД (Фаза 5): персист в water_log, чтобы переживала перезапуск и была видна тренеру.
+  const loadTodayWater = async () => {
+    if (!session?.user?.id) return;
+    const { data } = await supabase.from('water_log').select('liters').eq('user_id', session.user.id).eq('date', getCurrentDateString()).maybeSingle();
+    setWaterIntake(data?.liters || 0);
+  };
+  const persistWater = async (liters: number) => {
+    if (!session?.user?.id) return;
+    await supabase.from('water_log').upsert({ user_id: session.user.id, date: getCurrentDateString(), liters }, { onConflict: 'user_id, date' });
+  };
+  const addWater = () => {
+    if (waterIntake >= 5.0) return;
+    const next = Math.min(5.0, parseFloat((waterIntake + 0.2).toFixed(1)));
+    smoothStateUpdate(() => setWaterIntake(next));
+    persistWater(next);
+  };
+  const resetWater = () => {
+    smoothStateUpdate(() => setWaterIntake(0));
+    persistWater(0);
+  };
 
   // --- 📈 УЛУЧШЕННЫЙ ГРАФИК ВЕСА ---
   const chartDataMemo = useMemo(() => {
@@ -1250,7 +1276,7 @@ function useAppController() {
     isWeightModalVisible, setIsWeightModalVisible,
     manualWeightWhole, setManualWeightWhole, manualWeightDec, setManualWeightDec,
     chartPeriod, setChartPeriod, chartDataMemo, handleManualWeightUpdate,
-    waterIntake, addWater,
+    waterIntake, addWater, resetWater,
 
     // nutrition
     dailyCalorieNorm, dailyMacros, consumedCalories, consumedMacros,

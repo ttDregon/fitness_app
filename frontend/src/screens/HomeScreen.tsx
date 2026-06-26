@@ -13,7 +13,7 @@ import type { WeightLog, Group, GroupMember, TrainingSession } from '../types';
 export default function HomeScreen() {
   const {
     displayName, userRole, openAnimatedModal, handleTabChange, setIsScheduleListVisible, menuNavigate,
-    consumedCalories, dailyCalorieNorm, currentWeight, setIsWeightModalVisible, waterIntake, addWater,
+    consumedCalories, dailyCalorieNorm, currentWeight, setIsWeightModalVisible, waterIntake, addWater, resetWater,
     isWeightModalVisible, modalOpacityAnim, modalScaleAnim, closeAnimatedModal, userGoal, targetWeight,
     weightHistoryLogs, manualWeightWhole, setManualWeightWhole, manualWeightDec, setManualWeightDec,
     handleManualWeightUpdate, isLoading, isScheduleListVisible, startScheduling, isSchedulingVisible,
@@ -256,7 +256,7 @@ export default function HomeScreen() {
           <Ionicons name="water-outline" size={32} color="#0EA5E9" style={{marginBottom: 8}} />
           <Text style={styles.metricTitle}>Вода</Text>
           <Text style={styles.metricValue}>{waterIntake.toFixed(1)} л</Text>
-          <TouchableOpacity style={styles.miniBtn} onPress={addWater}><Text style={styles.miniBtnText}>+200 мл</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.miniBtn} onPress={addWater} onLongPress={resetWater}><Text style={styles.miniBtnText}>+200 мл</Text></TouchableOpacity>
         </View>
       </View>
 

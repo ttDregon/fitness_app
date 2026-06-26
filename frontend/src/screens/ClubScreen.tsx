@@ -1,21 +1,20 @@
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Modal, Animated, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Animated, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { styles } from '../styles';
 import { COLORS } from '../theme';
 import { groupWorkoutData } from '../utils/workout';
 import { getCurrentDateString } from '../utils/date';
 import { useApp } from '../context/AppContext';
+import ClientPlanModal from './ClientPlanModal';
 import type { AssignedWorkout, WorkoutData, GroupMember, GroupedWorkout, Group } from '../types';
 
 export default function ClubScreen() {
   const {
     activeGroup, session, todayWorkouts, setGroupMembers, setTodayWorkouts, smoothStateUpdate, setActiveGroup,
-    userRole, groupMembers, fetchGroupDetails, openAnimatedModal, setSelectedMember, selectedMember,
-    setIsMyWorkoutVisible, isMyWorkoutVisible, assignNote, setAssignNote, assignWorkoutToMember, isLoading,
-    assignWorkoutDate, setAssignWorkoutDate, assignDateObj, setAssignDateObj, assignDatePickerVisible, setAssignDatePickerVisible, onAssignDateChange,
-    myPlanViewDate, setMyPlanViewDate, myDayPlan, setMyDayPlan, shiftMyPlanDate, memberDayPlan, clientProfile,
+    userRole, groupMembers, fetchGroupDetails, openAnimatedModal, setSelectedMember,
+    setIsMyWorkoutVisible, isMyWorkoutVisible, setAssignWorkoutDate, setAssignDateObj,
+    myPlanViewDate, setMyPlanViewDate, myDayPlan, setMyDayPlan, shiftMyPlanDate,
     toggleExerciseStatus, deleteOrLeaveGroup, groups, setIsCreatingGroup, handleTabChange, setIsJoiningGroup,
     isCreatingGroup, newGroupName, setNewGroupName, createGroup, isJoiningGroup, joinCode, setJoinCode, joinGroup,
     modalOpacityAnim, modalScaleAnim, closeAnimatedModal,
@@ -73,92 +72,7 @@ export default function ClubScreen() {
           )}
         </ScrollView>
 
-        {selectedMember && (
-          <Modal transparent animationType="none" onRequestClose={() => closeAnimatedModal(() => setSelectedMember(null))}>
-            <Animated.View style={[styles.modalOverlayFull, { opacity: modalOpacityAnim }]}>
-              <Animated.View style={[styles.modalContentFull, { transform: [{ scale: modalScaleAnim }] }]}>
-                <View style={styles.modalHeaderFull}>
-                  <Text style={styles.modalTitleFull}>План: {selectedMember?.name || selectedMember?.email?.split('@')[0]}</Text>
-                  <TouchableOpacity onPress={() => closeAnimatedModal(() => setSelectedMember(null))}>
-                    <Ionicons name="close-circle" size={36} color={COLORS.textSecondary} />
-                  </TouchableOpacity>
-                </View>
-                <ScrollView style={{width: '100%', marginTop: 10}} showsVerticalScrollIndicator={false}>
-                  {clientProfile && (() => {
-                    const goalMap: Record<string, string> = { lose: 'Похудение', gain: 'Набор массы', maintain: 'Поддержание формы' };
-                    const goalLabel = goalMap[clientProfile.goal] || 'Не указана';
-                    const cw = clientProfile.weight || 0;
-                    const tw = clientProfile.target_weight;
-                    const startW = clientProfile.startWeight || cw;
-                    const hasTarget = tw && tw > 0;
-                    const total = hasTarget ? Math.abs(startW - tw) : 0;
-                    const done = hasTarget ? Math.abs(startW - cw) : 0;
-                    const pct = total > 0 ? Math.min(Math.round(done / total * 100), 100) : 0;
-                    return (
-                      <View style={{ backgroundColor: COLORS.bg, borderRadius: 18, padding: 18, marginBottom: 22 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: hasTarget ? 14 : 4 }}>
-                          <Ionicons name="flag" size={18} color={COLORS.tabBar} style={{ marginRight: 8 }} />
-                          <Text style={{ color: COLORS.textPrimary, fontSize: 15, fontWeight: '700' }}>Цель: {goalLabel}</Text>
-                        </View>
-                        {hasTarget && (
-                          <>
-                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                              <Text style={{ color: COLORS.textSecondary, fontSize: 13 }}>Старт {startW.toFixed(1)}</Text>
-                              <Text style={{ color: COLORS.textPrimary, fontSize: 13, fontWeight: '700' }}>Сейчас {cw.toFixed(1)}</Text>
-                              <Text style={{ color: COLORS.textSecondary, fontSize: 13 }}>Цель {tw.toFixed(1)}</Text>
-                            </View>
-                            <View style={styles.wmProgressBg}>
-                              <View style={[styles.wmProgressFill, { width: `${pct}%` as any }]} />
-                            </View>
-                            <Text style={[styles.wmProgressPct, { marginBottom: 16 }]}>Пройдено {pct}%</Text>
-                          </>
-                        )}
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
-                          <View style={{ flex: 1, alignItems: 'center' }}>
-                            <Text style={{ color: COLORS.textSecondary, fontSize: 12 }}>Вес сейчас</Text>
-                            <Text style={{ color: COLORS.textPrimary, fontSize: 18, fontWeight: '800', marginTop: 2 }}>{cw > 0 ? cw.toFixed(1) : '--'} кг</Text>
-                          </View>
-                          <View style={{ width: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />
-                          <View style={{ flex: 1, alignItems: 'center' }}>
-                            <Text style={{ color: COLORS.textSecondary, fontSize: 12 }}>Вода сегодня</Text>
-                            <Text style={{ color: COLORS.textPrimary, fontSize: 18, fontWeight: '800', marginTop: 2 }}>{(clientProfile.waterToday || 0).toFixed(1)} л</Text>
-                          </View>
-                        </View>
-                      </View>
-                    );
-                  })()}
-                  <Text style={styles.label}>Новая тренировка (ИИ):</Text>
-                  <TextInput style={styles.inputArea} multiline placeholder="Присед 100кг 3 по 10..." placeholderTextColor={COLORS.textSecondary} value={assignNote} onChangeText={setAssignNote} />
-                  <TouchableOpacity style={styles.pickerButton} onPress={() => setAssignDatePickerVisible(true)}>
-                    <Ionicons name="calendar-outline" size={20} color={COLORS.tabBar} />
-                    <Text style={styles.pickerButtonText}>Дата: {assignWorkoutDate}</Text>
-                  </TouchableOpacity>
-                  {assignDatePickerVisible && (
-                    <DateTimePicker value={assignDateObj} mode="date" display="default" onChange={onAssignDateChange} />
-                  )}
-                  <TouchableOpacity style={[styles.button, {marginBottom: 30}]} onPress={assignWorkoutToMember} disabled={isLoading}>{isLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Добавить/Назначить</Text>}</TouchableOpacity>
-                  <Text style={styles.historyTitle}>Выполнение на {assignWorkoutDate}:</Text>
-                  {(() => {
-                    const plan = memberDayPlan;
-                    if (!plan || !Array.isArray(plan.workout_data) || !plan.workout_data.length) return <Text style={styles.placeholderText}>План не назначен</Text>;
-                    const groupedData = groupWorkoutData(plan.workout_data);
-                    return groupedData.map((group: GroupedWorkout, gIdx: number) => (
-                      <View key={gIdx} style={{marginBottom: 20, backgroundColor: COLORS.bg, padding: 15, borderRadius: 16}}>
-                        <Text style={styles.groupExerciseTitle}>{group.exercise}</Text>
-                        {group.sets.map((ex: WorkoutData, idx: number) => (
-                          <View key={idx} style={[styles.setRow, {paddingVertical: 10, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)', paddingLeft: 5}]}>
-                            <Text style={[styles.exerciseSetText, ex.completed && {textDecorationLine: 'line-through', color: COLORS.textSecondary}]}>Подход {idx + 1}: {ex.weight}кг x {ex.reps}</Text>
-                            <Ionicons name={ex.completed ? "checkmark-circle" : "ellipse-outline"} size={28} color={ex.completed ? COLORS.success : COLORS.textSecondary} />
-                          </View>
-                        ))}
-                      </View>
-                    ));
-                  })()}
-                </ScrollView>
-              </Animated.View>
-            </Animated.View>
-          </Modal>
-        )}
+        <ClientPlanModal />
 
         {isMyWorkoutVisible && (
           <Modal transparent animationType="none" onRequestClose={() => closeAnimatedModal(setIsMyWorkoutVisible)}>

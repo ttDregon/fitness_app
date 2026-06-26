@@ -1,9 +1,11 @@
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Modal, Animated, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { styles } from '../styles';
 import { COLORS } from '../theme';
 import { groupWorkoutData } from '../utils/workout';
+import { getCurrentDateString } from '../utils/date';
 import { useApp } from '../context/AppContext';
 import type { AssignedWorkout, WorkoutData, GroupMember, GroupedWorkout, Group } from '../types';
 
@@ -12,7 +14,9 @@ export default function ClubScreen() {
     activeGroup, session, todayWorkouts, setGroupMembers, setTodayWorkouts, smoothStateUpdate, setActiveGroup,
     userRole, groupMembers, fetchGroupDetails, openAnimatedModal, setSelectedMember, selectedMember,
     setIsMyWorkoutVisible, isMyWorkoutVisible, assignNote, setAssignNote, assignWorkoutToMember, isLoading,
-    toggleExerciseStatus, deleteOrLeaveGroup, groups, setIsCreatingGroup, setIsSideMenuVisible, setIsJoiningGroup,
+    assignWorkoutDate, setAssignWorkoutDate, assignDateObj, setAssignDateObj, assignDatePickerVisible, setAssignDatePickerVisible, onAssignDateChange,
+    myPlanViewDate, setMyPlanViewDate, myDayPlan, setMyDayPlan, shiftMyPlanDate, memberDayPlan, clientProfile,
+    toggleExerciseStatus, deleteOrLeaveGroup, groups, setIsCreatingGroup, handleTabChange, setIsJoiningGroup,
     isCreatingGroup, newGroupName, setNewGroupName, createGroup, isJoiningGroup, joinCode, setJoinCode, joinGroup,
     modalOpacityAnim, modalScaleAnim, closeAnimatedModal,
   } = useApp();
@@ -47,7 +51,7 @@ export default function ClubScreen() {
                 if (session?.user && member.id === session.user.id) return null;
                 const progress = calculateProgress(member.id);
                 return (
-                  <TouchableOpacity key={member.id} style={styles.memberCard} onPress={() => openAnimatedModal(() => setSelectedMember(member))}>
+                  <TouchableOpacity key={member.id} style={styles.memberCard} onPress={() => { setAssignWorkoutDate(getCurrentDateString()); setAssignDateObj(new Date()); openAnimatedModal(() => setSelectedMember(member)); }}>
                     <View style={{flex: 1}}>
                       <Text style={styles.memberName}>{member.name || member.email}</Text>
                       <Text style={styles.memberRole}>Прогресс: {Math.round(progress)}%</Text>
@@ -60,9 +64,9 @@ export default function ClubScreen() {
           )}
           {userRole === 'client' && (
             <View style={{marginTop: 10}}>
-              <TouchableOpacity style={styles.mainActionBtn} onPress={() => openAnimatedModal(setIsMyWorkoutVisible)}>
+              <TouchableOpacity style={styles.mainActionBtn} onPress={() => { setMyPlanViewDate(getCurrentDateString()); setMyDayPlan(null); openAnimatedModal(setIsMyWorkoutVisible); }}>
                 <Ionicons name="fitness-outline" size={24} color="#fff" style={{marginRight: 10}} />
-                <Text style={styles.mainActionText}>Моя тренировка на сегодня</Text>
+                <Text style={styles.mainActionText}>Моя тренировка</Text>
               </TouchableOpacity>
               <Text style={styles.placeholderText}>Код клуба: {activeGroup.code}</Text>
             </View>
@@ -80,12 +84,62 @@ export default function ClubScreen() {
                   </TouchableOpacity>
                 </View>
                 <ScrollView style={{width: '100%', marginTop: 10}} showsVerticalScrollIndicator={false}>
+                  {clientProfile && (() => {
+                    const goalMap: Record<string, string> = { lose: 'Похудение', gain: 'Набор массы', maintain: 'Поддержание формы' };
+                    const goalLabel = goalMap[clientProfile.goal] || 'Не указана';
+                    const cw = clientProfile.weight || 0;
+                    const tw = clientProfile.target_weight;
+                    const startW = clientProfile.startWeight || cw;
+                    const hasTarget = tw && tw > 0;
+                    const total = hasTarget ? Math.abs(startW - tw) : 0;
+                    const done = hasTarget ? Math.abs(startW - cw) : 0;
+                    const pct = total > 0 ? Math.min(Math.round(done / total * 100), 100) : 0;
+                    return (
+                      <View style={{ backgroundColor: COLORS.bg, borderRadius: 18, padding: 18, marginBottom: 22 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: hasTarget ? 14 : 4 }}>
+                          <Ionicons name="flag" size={18} color={COLORS.tabBar} style={{ marginRight: 8 }} />
+                          <Text style={{ color: COLORS.textPrimary, fontSize: 15, fontWeight: '700' }}>Цель: {goalLabel}</Text>
+                        </View>
+                        {hasTarget && (
+                          <>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                              <Text style={{ color: COLORS.textSecondary, fontSize: 13 }}>Старт {startW.toFixed(1)}</Text>
+                              <Text style={{ color: COLORS.textPrimary, fontSize: 13, fontWeight: '700' }}>Сейчас {cw.toFixed(1)}</Text>
+                              <Text style={{ color: COLORS.textSecondary, fontSize: 13 }}>Цель {tw.toFixed(1)}</Text>
+                            </View>
+                            <View style={styles.wmProgressBg}>
+                              <View style={[styles.wmProgressFill, { width: `${pct}%` as any }]} />
+                            </View>
+                            <Text style={[styles.wmProgressPct, { marginBottom: 16 }]}>Пройдено {pct}%</Text>
+                          </>
+                        )}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                          <View style={{ flex: 1, alignItems: 'center' }}>
+                            <Text style={{ color: COLORS.textSecondary, fontSize: 12 }}>Вес сейчас</Text>
+                            <Text style={{ color: COLORS.textPrimary, fontSize: 18, fontWeight: '800', marginTop: 2 }}>{cw > 0 ? cw.toFixed(1) : '--'} кг</Text>
+                          </View>
+                          <View style={{ width: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                          <View style={{ flex: 1, alignItems: 'center' }}>
+                            <Text style={{ color: COLORS.textSecondary, fontSize: 12 }}>Вода сегодня</Text>
+                            <Text style={{ color: COLORS.textPrimary, fontSize: 18, fontWeight: '800', marginTop: 2 }}>{(clientProfile.waterToday || 0).toFixed(1)} л</Text>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })()}
                   <Text style={styles.label}>Новая тренировка (ИИ):</Text>
                   <TextInput style={styles.inputArea} multiline placeholder="Присед 100кг 3 по 10..." placeholderTextColor={COLORS.textSecondary} value={assignNote} onChangeText={setAssignNote} />
+                  <TouchableOpacity style={styles.pickerButton} onPress={() => setAssignDatePickerVisible(true)}>
+                    <Ionicons name="calendar-outline" size={20} color={COLORS.tabBar} />
+                    <Text style={styles.pickerButtonText}>Дата: {assignWorkoutDate}</Text>
+                  </TouchableOpacity>
+                  {assignDatePickerVisible && (
+                    <DateTimePicker value={assignDateObj} mode="date" display="default" onChange={onAssignDateChange} />
+                  )}
                   <TouchableOpacity style={[styles.button, {marginBottom: 30}]} onPress={assignWorkoutToMember} disabled={isLoading}>{isLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Добавить/Назначить</Text>}</TouchableOpacity>
-                  <Text style={styles.historyTitle}>Выполнение сегодня:</Text>
+                  <Text style={styles.historyTitle}>Выполнение на {assignWorkoutDate}:</Text>
                   {(() => {
-                    const plan = todayWorkouts.find((w: AssignedWorkout) => w.client_id === selectedMember?.id);
+                    const plan = memberDayPlan;
                     if (!plan || !Array.isArray(plan.workout_data) || !plan.workout_data.length) return <Text style={styles.placeholderText}>План не назначен</Text>;
                     const groupedData = groupWorkoutData(plan.workout_data);
                     return groupedData.map((group: GroupedWorkout, gIdx: number) => (
@@ -111,33 +165,55 @@ export default function ClubScreen() {
             <Animated.View style={[styles.modalOverlayFull, { opacity: modalOpacityAnim }]}>
               <Animated.View style={[styles.modalContentFull, { transform: [{ scale: modalScaleAnim }] }]}>
                 <View style={styles.modalHeaderFull}>
-                  <Text style={styles.modalTitleFull}>План на сегодня</Text>
+                  <Text style={styles.modalTitleFull}>Мой план</Text>
                   <TouchableOpacity onPress={() => closeAnimatedModal(setIsMyWorkoutVisible)}>
                     <Ionicons name="close-circle" size={36} color={COLORS.textSecondary} />
                   </TouchableOpacity>
                 </View>
-                <ScrollView style={{width: '100%', marginTop: 10}} showsVerticalScrollIndicator={false}>
-                  {!myPlan || !Array.isArray(myPlan.workout_data) || !myPlan.workout_data.length ? (
-                      <View style={{alignItems: 'center', marginTop: 50}}>
-                        <Ionicons name="cafe-outline" size={90} color={COLORS.tabBar} style={{opacity: 0.8}} />
-                        <Text style={styles.emptyText}>Тренер еще не назначил план. Отдыхаем!</Text>
-                      </View>
-                  ) : (
-                    groupWorkoutData(myPlan.workout_data).map((group: GroupedWorkout, gIdx: number) => (
+                <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6}}>
+                  <TouchableOpacity onPress={() => shiftMyPlanDate(-1)} style={{padding: 8}}><Ionicons name="chevron-back" size={26} color={COLORS.tabBar} /></TouchableOpacity>
+                  <Text style={{color: COLORS.textPrimary, fontSize: 17, fontWeight: '800'}}>
+                    {myPlanViewDate === getCurrentDateString() ? 'Сегодня' : new Date(myPlanViewDate + 'T12:00:00').toLocaleDateString('ru-RU', {weekday: 'short', day: 'numeric', month: 'short'})}
+                  </Text>
+                  <TouchableOpacity onPress={() => shiftMyPlanDate(1)} style={{padding: 8}}><Ionicons name="chevron-forward" size={26} color={COLORS.tabBar} /></TouchableOpacity>
+                </View>
+                <ScrollView style={{width: '100%', marginTop: 6}} showsVerticalScrollIndicator={false}>
+                  {(() => {
+                    const isViewingToday = myPlanViewDate === getCurrentDateString();
+                    const planToShow = isViewingToday ? myPlan : myDayPlan;
+                    if (!planToShow || !Array.isArray(planToShow.workout_data) || !planToShow.workout_data.length) {
+                      return (
+                        <View style={{alignItems: 'center', marginTop: 50}}>
+                          <Ionicons name="cafe-outline" size={90} color={COLORS.tabBar} style={{opacity: 0.8}} />
+                          <Text style={styles.emptyText}>{isViewingToday ? 'Тренер еще не назначил план. Отдыхаем!' : 'На этот день плана нет'}</Text>
+                        </View>
+                      );
+                    }
+                    return groupWorkoutData(planToShow.workout_data).map((group: GroupedWorkout, gIdx: number) => (
                       <View key={gIdx} style={{marginBottom: 25}}>
                         <Text style={styles.groupExerciseTitle}>{group.exercise}</Text>
                         {group.sets.map((ex: WorkoutData, idx: number) => (
-                          <TouchableOpacity key={ex.id} style={styles.clientExerciseCard} onPress={() => toggleExerciseStatus(myPlan.id, ex.id, ex.completed || false)}>
-                            <View style={{flex: 1}}>
-                              <Text style={[styles.exerciseSetText, ex.completed && {textDecorationLine: 'line-through', color: COLORS.textSecondary}]}>Подход {idx + 1}</Text>
-                              <Text style={styles.setDetails}>{ex.weight}кг × {ex.reps}</Text>
+                          isViewingToday ? (
+                            <TouchableOpacity key={ex.id} style={styles.clientExerciseCard} onPress={() => toggleExerciseStatus(planToShow.id, ex.id, ex.completed || false)}>
+                              <View style={{flex: 1}}>
+                                <Text style={[styles.exerciseSetText, ex.completed && {textDecorationLine: 'line-through', color: COLORS.textSecondary}]}>Подход {idx + 1}</Text>
+                                <Text style={styles.setDetails}>{ex.weight}кг × {ex.reps}</Text>
+                              </View>
+                              <Ionicons name={ex.completed ? "checkbox" : "square-outline"} size={36} color={ex.completed ? COLORS.success : COLORS.textSecondary} />
+                            </TouchableOpacity>
+                          ) : (
+                            <View key={ex.id} style={styles.clientExerciseCard}>
+                              <View style={{flex: 1}}>
+                                <Text style={[styles.exerciseSetText, ex.completed && {textDecorationLine: 'line-through', color: COLORS.textSecondary}]}>Подход {idx + 1}</Text>
+                                <Text style={styles.setDetails}>{ex.weight}кг × {ex.reps}</Text>
+                              </View>
+                              <Ionicons name={ex.completed ? "checkbox" : "square-outline"} size={36} color={ex.completed ? COLORS.success : COLORS.textSecondary} />
                             </View>
-                            <Ionicons name={ex.completed ? "checkbox" : "square-outline"} size={36} color={ex.completed ? COLORS.success : COLORS.textSecondary} />
-                          </TouchableOpacity>
+                          )
                         ))}
                       </View>
-                    ))
-                  )}
+                    ));
+                  })()}
                 </ScrollView>
               </Animated.View>
             </Animated.View>
@@ -153,7 +229,7 @@ export default function ClubScreen() {
         <View style={{ flex: 1, marginRight: 15 }}><Text style={styles.pageTitle} numberOfLines={1}>Клубы</Text></View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           {userRole === 'trainer' && (<TouchableOpacity onPress={() => openAnimatedModal(setIsCreatingGroup)} style={{ marginRight: 15 }}><Ionicons name="add-circle" size={40} color={COLORS.tabBar} /></TouchableOpacity>)}
-          <TouchableOpacity onPress={() => openAnimatedModal(setIsSideMenuVisible)} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
+          <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
         </View>
       </View>
       {groups.length === 0 ? (

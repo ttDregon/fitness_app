@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from '../styles';
@@ -8,10 +8,12 @@ import { useApp } from '../context/AppContext';
 export default function ChatScreen() {
   const {
     isChatSidebarVisible, setIsChatSidebarVisible, createNewChat, chatSessions, activeChatId,
-    smoothStateUpdate, setActiveChatId, deleteChat, displayName, openAnimatedModal, setIsSideMenuVisible,
+    smoothStateUpdate, setActiveChatId, deleteChat, displayName, openAnimatedModal, handleTabChange,
     editingMessageId, editInput, setEditInput, setEditingMessageId, saveEditMessage, startEditMessage,
-    isChatLoading, chatInput, setChatInput, handleSendChatMessage, chatScrollRef,
+    isChatLoading, handleSendChatMessage, chatScrollRef,
   } = useApp();
+  // Локальный стейт ввода — чтобы набор текста не перерисовывал весь общий контекст.
+  const [chatInput, setChatInput] = useState('');
 
   const renderChatSidebar = () => {
     if (!isChatSidebarVisible) return null;
@@ -59,7 +61,7 @@ export default function ChatScreen() {
         <View style={{ flex: 1, marginRight: 15 }}>
            <Text style={styles.pageTitle} numberOfLines={1}>{activeChatId ? activeChat?.title : 'Новый чат'}</Text>
         </View>
-        <TouchableOpacity onPress={() => openAnimatedModal(setIsSideMenuVisible)} style={styles.profileBtn}>
+        <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}>
            <Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} />
         </TouchableOpacity>
       </View>
@@ -104,7 +106,7 @@ export default function ChatScreen() {
 
       <View style={styles.chatInputRow}>
         <TextInput style={styles.chatInput} placeholder="Запитайте AI..." placeholderTextColor={COLORS.textSecondary} value={chatInput} onChangeText={setChatInput} multiline />
-        <TouchableOpacity style={styles.chatSendBtn} onPress={handleSendChatMessage} disabled={isChatLoading}><Ionicons name="send" size={22} color="#fff" /></TouchableOpacity>
+        <TouchableOpacity style={styles.chatSendBtn} onPress={() => { handleSendChatMessage(chatInput); setChatInput(''); }} disabled={isChatLoading}><Ionicons name="send" size={22} color="#fff" /></TouchableOpacity>
       </View>
     </View>
   );

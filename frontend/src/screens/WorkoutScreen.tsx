@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from '../styles';
@@ -8,18 +8,20 @@ import { useApp } from '../context/AppContext';
 import type { WorkoutRecord, GroupedWorkout, WorkoutData } from '../types';
 
 export default function WorkoutScreen() {
-  const { openAnimatedModal, setIsSideMenuVisible, note, setNote, sendToAI, isLoading, history } = useApp();
+  const { handleTabChange, sendToAI, isLoading, history } = useApp();
+  // Локальный стейт ввода — чтобы набор текста не перерисовывал весь общий контекст.
+  const [note, setNote] = useState('');
 
   return (
     <ScrollView contentContainerStyle={styles.mainContent} showsVerticalScrollIndicator={false}>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} translucent={false} />
       <View style={styles.header}>
         <View style={{ flex: 1, marginRight: 15 }}><Text style={styles.pageTitle} numberOfLines={1}>Личный Журнал</Text></View>
-        <TouchableOpacity onPress={() => openAnimatedModal(setIsSideMenuVisible)} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
       </View>
       <View style={styles.inputSection}>
         <TextInput style={styles.inputArea} multiline placeholder="Жим 100кг 5 по 5..." placeholderTextColor={COLORS.textSecondary} value={note} onChangeText={setNote} />
-        <TouchableOpacity style={styles.button} onPress={sendToAI} disabled={isLoading}>{isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Сохранить с помощью ИИ</Text>}</TouchableOpacity>
+        <TouchableOpacity style={styles.button} onPress={async () => { const ok = await sendToAI(note); if (ok) setNote(''); }} disabled={isLoading}>{isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Сохранить с помощью ИИ</Text>}</TouchableOpacity>
       </View>
       <Text style={styles.historyTitle}>Последние записи</Text>
       {history.map((workout: WorkoutRecord) => {

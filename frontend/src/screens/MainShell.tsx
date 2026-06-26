@@ -12,15 +12,15 @@ import SettingsScreen from './SettingsScreen';
 import ChatScreen from './ChatScreen';
 import StatsScreen from './StatsScreen';
 import NutritionScreen from './NutritionScreen';
+import ProfileScreen from './ProfileScreen';
 import type { SavedAccount } from '../types';
 
 export default function MainShell() {
   const {
     currentTab, activeGroup, contentFadeAnim, setActiveGroup, setCurrentTab,
-    isSideMenuVisible, closeAnimatedModal, modalOpacityAnim, modalScaleAnim, displayName, userRole,
-    menuNavigate, openAnimatedModal, setIsScheduleListVisible, setIsAccountSwitcherVisible, handleSignOut,
+    closeAnimatedModal, modalOpacityAnim, modalScaleAnim, setIsAccountSwitcherVisible,
     isAccountSwitcherVisible, savedAccounts, session, handleSwitchAccount, handleAddAnotherAccount,
-    handleTabChange, setIsSideMenuVisible,
+    handleTabChange,
   } = useApp();
 
   const renderContent = () => {
@@ -29,6 +29,7 @@ export default function MainShell() {
       case 'workout': return <WorkoutScreen />;
       case 'club': return <ClubScreen />;
       case 'settings': return <SettingsScreen />;
+      case 'profile': return <ProfileScreen />;
       case 'chat': return <ChatScreen />;
       case 'stats': return <StatsScreen />;
       case 'nutrition': return <NutritionScreen />;
@@ -44,30 +45,6 @@ export default function MainShell() {
           {renderContent()}
         </TabErrorBoundary>
       </Animated.View>
-
-      {isSideMenuVisible && (
-        <Modal transparent animationType="none" onRequestClose={() => closeAnimatedModal(setIsSideMenuVisible)}>
-          <Animated.View style={[styles.sideMenuOverlay, { opacity: modalOpacityAnim }]}>
-            <TouchableOpacity style={styles.sideMenuCloseArea} onPress={() => closeAnimatedModal(setIsSideMenuVisible)} />
-            <Animated.View style={[styles.sideMenuContent, { transform: [{ translateX: modalScaleAnim.interpolate({ inputRange: [0.9, 1], outputRange: [200, 0] }) }] }]}>
-              <View style={styles.sideMenuHeader}><Ionicons name="person-circle" size={86} color={COLORS.tabBar} /><Text style={styles.sideMenuName} numberOfLines={1}>{displayName}</Text><Text style={styles.sideMenuRole}>{userRole === 'trainer' ? 'Фитнес-тренер' : 'Спортсмен'}</Text></View>
-              <ScrollView style={styles.sideMenuNav} showsVerticalScrollIndicator={false}>
-                <TouchableOpacity style={styles.sideMenuLink} onPress={() => menuNavigate('home')}><Ionicons name={currentTab === 'home' ? "home" : "home-outline"} size={26} color={currentTab === 'home' ? COLORS.tabBar : COLORS.textPrimary} /><Text style={[styles.sideMenuLinkText, currentTab === 'home' && {fontWeight: 'bold', color: COLORS.tabBar}]}>Главная</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.sideMenuLink} onPress={() => menuNavigate('workout')}><Ionicons name={currentTab === 'workout' ? "barbell" : "barbell-outline"} size={26} color={currentTab === 'workout' ? COLORS.tabBar : COLORS.textPrimary} /><Text style={[styles.sideMenuLinkText, currentTab === 'workout' && {fontWeight: 'bold', color: COLORS.tabBar}]}>Журнал</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.sideMenuLink} onPress={() => menuNavigate('club')}><Ionicons name={currentTab === 'club' ? "people" : "people-outline"} size={26} color={currentTab === 'club' ? COLORS.tabBar : COLORS.textPrimary} /><Text style={[styles.sideMenuLinkText, currentTab === 'club' && {fontWeight: 'bold', color: COLORS.tabBar}]}>Клубы</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.sideMenuLink} onPress={() => { setIsSideMenuVisible(false); openAnimatedModal(setIsScheduleListVisible); }}><Ionicons name="calendar-outline" size={26} color={COLORS.textPrimary} /><Text style={styles.sideMenuLinkText}>Календарь</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.sideMenuLink} onPress={() => menuNavigate('chat')}><Ionicons name={currentTab === 'chat' ? "chatbubble" : "chatbubble-outline"} size={26} color={currentTab === 'chat' ? COLORS.tabBar : COLORS.textPrimary} /><Text style={[styles.sideMenuLinkText, currentTab === 'chat' && {fontWeight: 'bold', color: COLORS.tabBar}]}>Чат с ИИ</Text></TouchableOpacity>
-                <TouchableOpacity style={styles.sideMenuLink} onPress={() => menuNavigate('stats')}><Ionicons name={currentTab === 'stats' ? "stats-chart" : "stats-chart-outline"} size={26} color={currentTab === 'stats' ? COLORS.tabBar : COLORS.textPrimary} /><Text style={[styles.sideMenuLinkText, currentTab === 'stats' && {fontWeight: 'bold', color: COLORS.tabBar}]}>Статистика</Text></TouchableOpacity>
-                <View style={styles.sideMenuFooter}>
-                  <TouchableOpacity onPress={() => menuNavigate('settings')} style={styles.sideMenuBtn}><Ionicons name="settings-outline" size={26} color={COLORS.textPrimary} /><Text style={styles.sideMenuBtnText}>Настройки</Text></TouchableOpacity>
-                  <TouchableOpacity onPress={() => openAnimatedModal(setIsAccountSwitcherVisible)} style={[styles.sideMenuBtn, {marginTop: 20}]}><Ionicons name="swap-horizontal-outline" size={26} color={COLORS.textPrimary} /><Text style={styles.sideMenuBtnText}>Сменить аккаунт</Text></TouchableOpacity>
-                  <TouchableOpacity onPress={handleSignOut} style={[styles.sideMenuBtn, {marginTop: 20}]}><Ionicons name="log-out-outline" size={26} color={COLORS.error} /><Text style={[styles.sideMenuBtnText, {color: COLORS.error}]}>Выйти</Text></TouchableOpacity>
-                </View>
-              </ScrollView>
-            </Animated.View>
-          </Animated.View>
-        </Modal>
-      )}
 
       {isAccountSwitcherVisible && (
         <Modal transparent animationType="none" onRequestClose={() => closeAnimatedModal(setIsAccountSwitcherVisible)}>

@@ -3,7 +3,7 @@ import { Platform, Alert, Animated, Easing, LayoutAnimation, ScrollView } from '
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { getCurrentDateString } from '../utils/date';
-import { parseWorkout, parseMeal, calculateLoss, sendChat } from '../api/backend';
+import { parseWorkout, parseMeal, calculateLoss, sendChat, getBackendUrl } from '../api/backend';
 import type {
   Session, WorkoutData, SavedAccount, Group, GroupMember, WeightLog,
   WorkoutRecord, AssignedWorkout, TrainingSession, ChatMessage, ChatSession, Macros, MealPreview,
@@ -54,7 +54,6 @@ function useAppController() {
   const [consumedMacros, setConsumedMacros] = useState<Macros>({ protein: 0, fat: 0, carb: 0 });
 
   const [isMealModalVisible, setIsMealModalVisible] = useState<boolean>(false);
-  const [mealInput, setMealInput] = useState<string>('');
   const [isMealPreviewLoading, setIsMealPreviewLoading] = useState<boolean>(false);
   const [mealPreview, setMealPreview] = useState<MealPreview | null>(null);
 
@@ -65,7 +64,6 @@ function useAppController() {
   const [currentTab, setCurrentTab] = useState<string>('home');
   const [isSideMenuVisible, setIsSideMenuVisible] = useState<boolean>(false);
   const [waterIntake, setWaterIntake] = useState<number>(0);
-  const [note, setNote] = useState<string>('');
   const [history, setHistory] = useState<WorkoutRecord[]>([]);
 
   const [groups, setGroups] = useState<Group[]>([]);
@@ -79,6 +77,13 @@ function useAppController() {
   const [newGroupName, setNewGroupName] = useState<string>('');
   const [joinCode, setJoinCode] = useState<string>('');
   const [assignNote, setAssignNote] = useState<string>('');
+  const [assignWorkoutDate, setAssignWorkoutDate] = useState<string>(getCurrentDateString());
+  const [assignDateObj, setAssignDateObj] = useState<Date>(new Date());
+  const [assignDatePickerVisible, setAssignDatePickerVisible] = useState<boolean>(false);
+  const [myPlanViewDate, setMyPlanViewDate] = useState<string>(getCurrentDateString());
+  const [myDayPlan, setMyDayPlan] = useState<AssignedWorkout | null>(null);
+  const [memberDayPlan, setMemberDayPlan] = useState<AssignedWorkout | null>(null);
+  const [clientProfile, setClientProfile] = useState<any | null>(null);
   const [upcomingSessions, setUpcomingSessions] = useState<TrainingSession[]>([]);
   const [isScheduleListVisible, setIsScheduleListVisible] = useState<boolean>(false);
   const [isSchedulingVisible, setIsSchedulingVisible] = useState<boolean>(false);
@@ -96,7 +101,6 @@ function useAppController() {
   const [isChatSidebarVisible, setIsChatSidebarVisible] = useState<boolean>(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editInput, setEditInput] = useState<string>('');
-  const [chatInput, setChatInput] = useState<string>('');
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
   const chatScrollRef = useRef<ScrollView>(null);
 
@@ -190,6 +194,12 @@ function useAppController() {
     }
   }, [dailyCalorieNorm, currentWeight, session]);
 
+  // Прогрев бэкенда при запуске: Render на бесплатном тарифе засыпает после простоя и просыпается
+  // 30–60 сек. Будим его фоновым запросом сразу, чтобы к моменту чата/парсинга он уже был готов.
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/health`).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const loadSavedAccounts = async () => {
       try {
@@ -267,6 +277,10 @@ function useAppController() {
   }, [session]);
 
   useEffect(() => { if (activeGroup) fetchGroupDetails(); }, [activeGroup]);
+
+  useEffect(() => { if (selectedMember) loadMemberDayPlan(); else setMemberDayPlan(null); }, [selectedMember, assignWorkoutDate]);
+
+  useEffect(() => { if (selectedMember) fetchClientProfile(selectedMember.id); else setClientProfile(null); }, [selectedMember]);
 
   useEffect(() => {
     if (isWeightModalVisible && currentWeight > 0) {
@@ -534,7 +548,7 @@ function useAppController() {
   const handleSwitchAccount = async (account: SavedAccount) => {
     if (session?.user?.id === account.id) { setIsAccountSwitcherVisible(false); return; }
     setIsAccountSwitcherVisible(false); setIsSideMenuVisible(false); setIsSwitchingAccount(true);
-    setNote(''); setAssignNote(''); setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
+    setAssignNote(''); setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
     setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
     setTargetWeight(null);
     await supabase.auth.signOut();
@@ -556,7 +570,7 @@ function useAppController() {
     setIsAccountSwitcherVisible(false); setIsSideMenuVisible(false); await supabase.auth.signOut();
     setGroups([]); setHistory([]); setActiveGroup(null); setGroupMembers([]); setTodayWorkouts([]); setUpcomingSessions([]);
     smoothStateUpdate(() => {
-      setNote(''); setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
+      setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
       setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
       setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
       setTargetWeight(null);
@@ -570,7 +584,7 @@ function useAppController() {
     await supabase.auth.signOut();
     smoothStateUpdate(() => {
       setGroups([]); setHistory([]); setActiveGroup(null); setGroupMembers([]); setTodayWorkouts([]); setUpcomingSessions([]);
-      setNote(''); setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setIsSideMenuVisible(false); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
+      setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setIsSideMenuVisible(false); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
       setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
       setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
       setTargetWeight(null);
@@ -655,12 +669,55 @@ function useAppController() {
     if (event.type === 'set' && selectedTime) { setTempDate(selectedTime); setSchedTime(`${String(selectedTime.getHours()).padStart(2, '0')}:${String(selectedTime.getMinutes()).padStart(2, '0')}`); }
   };
 
+  const onAssignDateChange = (event: any, selectedDate: Date | undefined) => {
+    setAssignDatePickerVisible(false);
+    if (event.type === 'set' && selectedDate) { setAssignDateObj(selectedDate); setAssignWorkoutDate(`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`); }
+  };
+
   const saveTrainingSession = async () => {
     if (!schedDate || !schedTime || !schedSelectedMember) return;
     const { error } = await supabase.from('training_sessions').insert([{ group_id: schedSelectedGroup?.id, client_id: schedSelectedMember.id, trainer_id: session?.user?.id, session_date: schedDate, session_time: schedTime }]);
     if (error) Alert.alert("Ошибка", error.message); else { closeAnimatedModal(setIsSchedulingVisible); fetchUpcomingSessions(); setSchedSelectedGroup(null); setSchedSelectedMember(null); }
   };
   const deleteSession = async (id: string) => { const { error } = await supabase.from('training_sessions').delete().eq('id', id); if (!error) fetchUpcomingSessions(); };
+
+  const loadMyDayPlan = async (date: string) => {
+    if (!session?.user?.id || !activeGroup?.id) { setMyDayPlan(null); return; }
+    const { data } = await supabase.from('assigned_workouts').select('*').eq('group_id', activeGroup.id).eq('client_id', session.user.id).eq('date', date).maybeSingle();
+    setMyDayPlan((data as AssignedWorkout) || null);
+  };
+  const shiftMyPlanDate = (delta: number) => {
+    const [y, m, d] = myPlanViewDate.split('-').map(Number);
+    const base = new Date(y, m - 1, d);
+    base.setDate(base.getDate() + delta);
+    const ns = `${base.getFullYear()}-${String(base.getMonth() + 1).padStart(2, '0')}-${String(base.getDate()).padStart(2, '0')}`;
+    setMyPlanViewDate(ns);
+    loadMyDayPlan(ns);
+  };
+  const loadMemberDayPlan = async () => {
+    if (!selectedMember?.id || !activeGroup?.id) { setMemberDayPlan(null); return; }
+    const { data } = await supabase.from('assigned_workouts').select('*').eq('group_id', activeGroup.id).eq('client_id', selectedMember.id).eq('date', assignWorkoutDate).maybeSingle();
+    setMemberDayPlan((data as AssignedWorkout) || null);
+  };
+
+  // Профиль клиента для тренера: цель, прогресс по весу (старт→сейчас→цель), вода за сегодня.
+  // Старт — самая ранняя запись weight_log (нужна trainer-read политика, см. db/phase2_trainer_reads.sql);
+  // если её нет, откатываемся к текущему весу из profiles.
+  const fetchClientProfile = async (clientId: string) => {
+    try {
+      const today = getCurrentDateString();
+      const [profRes, startRes, waterRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', clientId).single(),
+        supabase.from('weight_log').select('weight, created_at').eq('user_id', clientId).order('created_at', { ascending: true }).limit(1),
+        supabase.from('water_log').select('liters').eq('user_id', clientId).eq('date', today).maybeSingle(),
+      ]);
+      const prof: any = profRes.data || {};
+      const startWeight = (startRes.data && startRes.data[0]?.weight) || prof.weight || 0;
+      setClientProfile({ ...prof, startWeight, waterToday: waterRes.data?.liters || 0 });
+    } catch (e) {
+      setClientProfile(null);
+    }
+  };
 
   const assignWorkoutToMember = async () => {
     if (!assignNote) return;
@@ -669,13 +726,13 @@ function useAppController() {
       const aiData = await parseWorkout(assignNote);
       if (!aiData || !Array.isArray(aiData.parsed_data)) throw new Error('ИИ вернул данные в неверном формате');
       const newExercises: WorkoutData[] = aiData.parsed_data.map((item: any, index: number) => ({ ...item, id: `task_${Date.now()}_${index}`, completed: false }));
-      const targetDate = getCurrentDateString();
+      const targetDate = assignWorkoutDate;
       const { data: existingPlan } = await supabase.from('assigned_workouts').select('*').eq('group_id', activeGroup?.id).eq('client_id', selectedMember?.id).eq('date', targetDate).maybeSingle();
       let finalWorkoutData: WorkoutData[] = [];
       if (existingPlan) { finalWorkoutData = [...(existingPlan.workout_data || []), ...newExercises]; } else { finalWorkoutData = newExercises; }
       const { error } = await supabase.from('assigned_workouts').upsert({ group_id: activeGroup?.id, client_id: selectedMember?.id, trainer_id: session?.user?.id, date: targetDate, workout_data: finalWorkoutData }, { onConflict: 'client_id, date' });
       if (error) throw error;
-      setAssignNote(''); fetchGroupDetails(); Alert.alert('Успех', 'План дополнен!');
+      setAssignNote(''); fetchGroupDetails(); loadMemberDayPlan(); Alert.alert('Успех', 'План дополнен!');
     } catch (e: any) { Alert.alert('Ошибка', e.message); } finally { setIsLoading(false); }
   };
 
@@ -792,11 +849,11 @@ function useAppController() {
     } catch (error: unknown) { Alert.alert('Ошибка регистрации', (error as any)?.message || 'Unknown error'); } finally { setIsLoadingAuth(false); }
   };
 
-  const sendToAI = async () => {
-    if (!note) return;
+  const sendToAI = async (noteText: string): Promise<boolean> => {
+    if (!noteText) return false;
     setIsLoading(true);
     try {
-      const data = await parseWorkout(note);
+      const data = await parseWorkout(noteText);
       const newParsedData = data.parsed_data || [];
 
       const { data: latestWorkouts } = await supabase
@@ -811,31 +868,31 @@ function useAppController() {
         const isToday = new Date(lastWorkout.created_at).toDateString() === new Date().toDateString();
 
         if (isToday) {
-          const combinedRawText = lastWorkout.raw_text + '\n' + note;
+          const combinedRawText = lastWorkout.raw_text + '\n' + noteText;
           const combinedParsedData = [...(lastWorkout.parsed_data || []), ...newParsedData];
           await supabase.from('workouts').update({ raw_text: combinedRawText, parsed_data: combinedParsedData }).eq('id', lastWorkout.id);
         } else {
-          await supabase.from('workouts').insert([{ raw_text: note, parsed_data: newParsedData, user_id: session?.user?.id }]);
+          await supabase.from('workouts').insert([{ raw_text: noteText, parsed_data: newParsedData, user_id: session?.user?.id }]);
         }
       } else {
-        await supabase.from('workouts').insert([{ raw_text: note, parsed_data: newParsedData, user_id: session?.user?.id }]);
+        await supabase.from('workouts').insert([{ raw_text: noteText, parsed_data: newParsedData, user_id: session?.user?.id }]);
       }
 
-      setNote('');
       loadHistory();
       if (newParsedData.length > 0) {
         const exercisesWithIds: WorkoutData[] = newParsedData.map((ex: any, i: number) => ({ ...ex, id: `manual_${Date.now()}_${i}` }));
         await registerActivityForWeightLoss(exercisesWithIds, true);
       }
       Alert.alert('Успех', 'Тренировка записана!');
-    } catch (e: any) { Alert.alert('Ошибка связи', e.message); } finally { setIsLoading(false); }
+      return true;
+    } catch (e: any) { Alert.alert('Ошибка связи', e.message); return false; } finally { setIsLoading(false); }
   };
 
-  const handleCalculateMealPreview = async () => {
-    if (!mealInput.trim()) return;
+  const handleCalculateMealPreview = async (mealText: string) => {
+    if (!mealText.trim()) return;
     setIsMealPreviewLoading(true);
     try {
-      const data = await parseMeal(mealInput);
+      const data = await parseMeal(mealText);
 
       // Проверяем, вернул ли ИИ правильные данные
       if (!data.name || data.calories === undefined) {
@@ -859,7 +916,6 @@ function useAppController() {
       consumedMacros.carb + mealPreview.carbs
     );
     closeAnimatedModal(setIsMealModalVisible);
-    setMealInput('');
     setMealPreview(null);
   };
 
@@ -910,12 +966,12 @@ function useAppController() {
     } catch (error) {
       const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "К сожалению я не могу вам с этим помочь", sender: 'ai' };
       smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, errorMsg], updatedAt: Date.now() } : c)));
-    } finally { setIsLoading(false); }
+    } finally { setIsChatLoading(false); }
   };
 
-  const handleSendChatMessage = async () => {
-    if (!chatInput.trim()) return;
-    const userMsg: ChatMessage = { id: Date.now().toString(), text: chatInput.trim(), sender: 'user' };
+  const handleSendChatMessage = async (messageText: string) => {
+    if (!messageText.trim()) return;
+    const userMsg: ChatMessage = { id: Date.now().toString(), text: messageText.trim(), sender: 'user' };
 
     let chatId = activeChatId;
     let isNewChat = false;
@@ -930,7 +986,6 @@ function useAppController() {
         : { ...activeChat!, messages: [...activeChat!.messages, userMsg], updatedAt: Date.now(), title: activeChat!.title === 'Новый диалог' ? generatedTitle : activeChat!.title };
 
     smoothStateUpdate(() => setChatSessions(prev => isNewChat ? [newSessionContent, ...prev] : prev.map(c => c.id === chatId ? newSessionContent : c)));
-    setChatInput('');
     setIsChatLoading(true);
 
     const apiMessages = newSessionContent.messages.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text }));
@@ -947,7 +1002,7 @@ function useAppController() {
     } catch (error) {
       const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "К сожалению я не могу вам с этим помочь", sender: 'ai' };
       smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, errorMsg], updatedAt: Date.now() } : c)));
-    } finally { setIsLoading(false); }
+    } finally { setIsChatLoading(false); }
   };
 
   const addWater = () => { smoothStateUpdate(() => { if (waterIntake < 5.0) setWaterIntake(prev => prev + 0.2); }); };
@@ -1165,17 +1220,20 @@ function useAppController() {
     // nutrition
     dailyCalorieNorm, dailyMacros, consumedCalories, consumedMacros,
     isMealModalVisible, setIsMealModalVisible,
-    mealInput, setMealInput, isMealPreviewLoading, mealPreview, setMealPreview,
+    isMealPreviewLoading, mealPreview, setMealPreview,
     handleCalculateMealPreview, confirmAddMeal,
 
     // workout journal
-    note, setNote, history, sendToAI,
+    history, sendToAI,
 
     // groups / clubs
     groups, activeGroup, setActiveGroup, groupMembers, setGroupMembers, todayWorkouts, setTodayWorkouts,
     isCreatingGroup, setIsCreatingGroup, isJoiningGroup, setIsJoiningGroup,
     selectedMember, setSelectedMember, isMyWorkoutVisible, setIsMyWorkoutVisible,
     newGroupName, setNewGroupName, joinCode, setJoinCode, assignNote, setAssignNote,
+    assignWorkoutDate, setAssignWorkoutDate, assignDateObj, setAssignDateObj, assignDatePickerVisible, setAssignDatePickerVisible, onAssignDateChange,
+    myPlanViewDate, setMyPlanViewDate, myDayPlan, setMyDayPlan, shiftMyPlanDate, memberDayPlan,
+    clientProfile,
     createGroup, joinGroup, deleteOrLeaveGroup, fetchGroupDetails,
     assignWorkoutToMember, toggleExerciseStatus,
 
@@ -1188,7 +1246,7 @@ function useAppController() {
 
     // chat
     chatSessions, activeChatId, setActiveChatId, isChatSidebarVisible, setIsChatSidebarVisible,
-    editingMessageId, setEditingMessageId, editInput, setEditInput, chatInput, setChatInput,
+    editingMessageId, setEditingMessageId, editInput, setEditInput,
     isChatLoading, chatScrollRef,
     createNewChat, deleteChat, startEditMessage, saveEditMessage, handleSendChatMessage,
   };

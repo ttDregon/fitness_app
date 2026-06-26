@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Modal, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from '../styles';
@@ -8,10 +8,12 @@ import { useApp } from '../context/AppContext';
 export default function NutritionScreen() {
   const {
     dailyCalorieNorm, consumedCalories, dailyMacros, consumedMacros,
-    openAnimatedModal, setIsSideMenuVisible, setIsMealModalVisible, isMealModalVisible,
-    modalOpacityAnim, modalScaleAnim, closeAnimatedModal, setMealPreview, setMealInput,
-    mealInput, handleCalculateMealPreview, isMealPreviewLoading, mealPreview, confirmAddMeal,
+    openAnimatedModal, handleTabChange, setIsMealModalVisible, isMealModalVisible,
+    modalOpacityAnim, modalScaleAnim, closeAnimatedModal, setMealPreview,
+    handleCalculateMealPreview, isMealPreviewLoading, mealPreview, confirmAddMeal,
   } = useApp();
+  // Локальный стейт ввода — чтобы набор текста не перерисовывал весь общий контекст.
+  const [mealInput, setMealInput] = useState('');
 
   const caloriesProgress = dailyCalorieNorm > 0 ? Math.min((consumedCalories / dailyCalorieNorm) * 100, 100) : 0;
   const pProgress = dailyMacros.protein > 0 ? Math.min((consumedMacros.protein / dailyMacros.protein) * 100, 100) : 0;
@@ -23,7 +25,7 @@ export default function NutritionScreen() {
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} translucent={false} />
       <View style={styles.header}>
         <View style={{ flex: 1, marginRight: 15 }}><Text style={styles.pageTitle} numberOfLines={1}>Питание</Text></View>
-        <TouchableOpacity onPress={() => openAnimatedModal(setIsSideMenuVisible)} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 80 }} showsVerticalScrollIndicator={false}>
@@ -80,7 +82,7 @@ export default function NutritionScreen() {
                    <Text style={styles.label}>Что вы съели?</Text>
                    <TextInput style={styles.inputArea} placeholder="Например: 200г вареной курицы и гречка" placeholderTextColor={COLORS.textSecondary} value={mealInput} onChangeText={setMealInput} multiline />
 
-                   <TouchableOpacity style={[styles.button, {marginBottom: 25}]} onPress={handleCalculateMealPreview} disabled={isMealPreviewLoading}>
+                   <TouchableOpacity style={[styles.button, {marginBottom: 25}]} onPress={() => handleCalculateMealPreview(mealInput)} disabled={isMealPreviewLoading}>
                       {isMealPreviewLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Рассчитать КБЖУ</Text>}
                    </TouchableOpacity>
 
@@ -95,7 +97,7 @@ export default function NutritionScreen() {
                             <View style={styles.previewMacro}><Text style={{color: COLORS.carb, fontWeight:'bold', marginBottom: 4}}>Углеводы</Text><Text style={{color: COLORS.textPrimary}}>{mealPreview.carbs} г</Text></View>
                          </View>
 
-                         <TouchableOpacity style={[styles.button, {marginTop: 25}]} onPress={confirmAddMeal}>
+                         <TouchableOpacity style={[styles.button, {marginTop: 25}]} onPress={() => { confirmAddMeal(); setMealInput(''); }}>
                             <Text style={styles.buttonText}>Добавить</Text>
                          </TouchableOpacity>
                       </View>

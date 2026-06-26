@@ -12,7 +12,7 @@ import type { WeightLog, Group, GroupMember, TrainingSession } from '../types';
 
 export default function HomeScreen() {
   const {
-    displayName, userRole, openAnimatedModal, setIsSideMenuVisible, setIsScheduleListVisible, menuNavigate,
+    displayName, userRole, openAnimatedModal, handleTabChange, setIsScheduleListVisible, menuNavigate,
     consumedCalories, dailyCalorieNorm, currentWeight, setIsWeightModalVisible, waterIntake, addWater,
     isWeightModalVisible, modalOpacityAnim, modalScaleAnim, closeAnimatedModal, userGoal, targetWeight,
     weightHistoryLogs, manualWeightWhole, setManualWeightWhole, manualWeightDec, setManualWeightDec,
@@ -220,7 +220,7 @@ export default function HomeScreen() {
           <Text style={styles.greeting} numberOfLines={1}>Привет, {displayName}! 👋</Text>
           <Text style={styles.subGreeting}>{userRole === 'trainer' ? 'Тренер' : 'Спортсмен'}</Text>
         </View>
-        <TouchableOpacity onPress={() => openAnimatedModal(setIsSideMenuVisible)} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
       </View>
 
       <TouchableOpacity style={[styles.mainActionBtn, {backgroundColor: COLORS.card, borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.4)', marginBottom: 15, shadowColor: 'transparent', elevation: 0}]} onPress={() => openAnimatedModal(setIsScheduleListVisible)}>

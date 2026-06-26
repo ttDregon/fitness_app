@@ -55,6 +55,19 @@ class WorkoutLossPayload(BaseModel):
     exercises: list
 
 
+# Лёгкие health-роуты: ничего не вызывают (ни DeepSeek, ни Supabase), отвечают мгновенно.
+# Нужны, чтобы (1) фронт «будил» Render при старте и (2) внешний бесплатный пингер
+# (UptimeRobot/cron-job.org) держал сервер живым, не давая ему заснуть.
+@app.get("/")
+async def root():
+    return {"status": "ok"}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
 @app.post("/parse")
 async def parse_workout(note: WorkoutNote):
     print(f"\n--- ЗАПРОС К DEEPSEEK (ПАРСИНГ ТРЕНИРОВКИ) ---")

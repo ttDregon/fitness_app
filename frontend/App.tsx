@@ -1,9 +1,10 @@
-import React from 'react';
-import { Platform, UIManager, LogBox, ActivityIndicator, Text, TextInput, StatusBar } from 'react-native';
+import React, { useState } from 'react';
+import { View, Platform, UIManager, LogBox, ActivityIndicator, Text, TextInput, StatusBar } from 'react-native';
 import { AppProvider, useApp } from './src/context/AppContext';
 import AuthScreen from './src/screens/AuthScreen';
 import MainShell from './src/screens/MainShell';
 import { ScreenBackground } from './src/components/Gradient';
+import { BootScreen } from './src/components/BootScreen';
 import { COLORS } from './src/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -27,27 +28,39 @@ LogBox.ignoreLogs([
 ]);
 
 function Root() {
-  const { isSwitchingAccount, session, authReady } = useApp();
+  const { isSwitchingAccount, session, authReady, bootReady } = useApp();
+  // Экран загрузки показывается один раз за «холодный» запуск процесса.
+  const [bootDone, setBootDone] = useState(false);
 
-  // Пока не проверена сохранённая сессия (или идёт смена аккаунта) — показываем заставку,
-  // а не экран входа. Иначе при холодном старте на миг мелькает окно входа.
-  if (isSwitchingAccount || !authReady) {
+  // Смена аккаунта — отдельный тёмный лоадер.
+  if (isSwitchingAccount) {
     return (
-      <ScreenBackground style={{ justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, backgroundColor: COLORS.bg, alignItems: 'center', justifyContent: 'center' }}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
         <ActivityIndicator size="large" color={COLORS.accentHover} />
+      </View>
+    );
+  }
+
+  // Сессия проверена и её нет → экран входа.
+  if (authReady && !session) {
+    return (
+      <ScreenBackground>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+        <AuthScreen />
       </ScreenBackground>
     );
   }
 
-  if (!session) return (
-    <ScreenBackground>
+  // Иначе: идёт проверка сессии ИЛИ грузятся данные → главный экран под экраном загрузки.
+  const showMain = authReady && !!session;
+  return (
+    <>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <AuthScreen />
-    </ScreenBackground>
+      {showMain && <MainShell />}
+      {!bootDone && <BootScreen done={showMain && bootReady} onFinish={() => setBootDone(true)} />}
+    </>
   );
-
-  return <MainShell />;
 }
 
 export default function App() {

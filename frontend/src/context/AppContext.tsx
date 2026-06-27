@@ -15,6 +15,8 @@ function useAppController() {
   const [session, setSession] = useState<Session | null>(null);
   // false, пока не проверили сохранённую сессию — чтобы при старте не мелькал экран входа.
   const [authReady, setAuthReady] = useState(false);
+  // false, пока при холодном старте не загрузятся ключевые данные (показываем экран загрузки).
+  const [bootReady, setBootReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
   const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
@@ -278,27 +280,40 @@ function useAppController() {
   }, [upcomingSessions]);
 
   useEffect(() => {
-    if (session) {
-      loadHistory(); fetchGroups(); fetchUpcomingSessions(); fetchUserProfileData(); fetchWeightLog(); loadTodayNutritionData(); loadClientNutrition(); loadTodayWater(); registerPushToken();
-      const loadPending = async () => {
-        try {
-          if (Platform.OS !== 'web') {
-            const savedPending = await AsyncStorage.getItem('pendingExercises');
+    if (!session) return; // нет сессии → экран входа; bootReady не нужен
+    let cancelled = false;
+    const loadPending = async () => {
+      try {
+        if (Platform.OS !== 'web') {
+          const savedPending = await AsyncStorage.getItem('pendingExercises');
+          if (savedPending) setPendingExerciseCount(JSON.parse(savedPending).length);
+          const savedTime = await AsyncStorage.getItem('lastActivityTime');
+          if (savedTime) setLastActivityTime(parseInt(savedTime, 10));
+        } else {
+          if (typeof window !== 'undefined') {
+            const savedPending = window.localStorage.getItem('pendingExercises');
             if (savedPending) setPendingExerciseCount(JSON.parse(savedPending).length);
-            const savedTime = await AsyncStorage.getItem('lastActivityTime');
+            const savedTime = window.localStorage.getItem('lastActivityTime');
             if (savedTime) setLastActivityTime(parseInt(savedTime, 10));
-          } else {
-            if (typeof window !== 'undefined') {
-              const savedPending = window.localStorage.getItem('pendingExercises');
-              if (savedPending) setPendingExerciseCount(JSON.parse(savedPending).length);
-              const savedTime = window.localStorage.getItem('lastActivityTime');
-              if (savedTime) setLastActivityTime(parseInt(savedTime, 10));
-            }
           }
-        } catch (e) {}
-      };
+        }
+      } catch (e) {}
+    };
+    // Ждём ключевые данные (но не дольше 7с), затем снимаем экран загрузки.
+    (async () => {
+      const tasks = [
+        loadHistory(), fetchGroups(), fetchUpcomingSessions(), fetchUserProfileData(),
+        fetchWeightLog(), loadTodayNutritionData(), loadClientNutrition(), loadTodayWater(),
+      ];
+      await Promise.race([
+        Promise.allSettled(tasks),
+        new Promise(res => setTimeout(res, 7000)),
+      ]);
       loadPending();
-    }
+      registerPushToken(); // не блокирует показ интерфейса
+      if (!cancelled) setBootReady(true);
+    })();
+    return () => { cancelled = true; };
   }, [session]);
 
   useEffect(() => { if (activeGroup) fetchGroupDetails(); }, [activeGroup]);
@@ -1334,7 +1349,7 @@ function useAppController() {
 
   return {
     // session / auth
-    session, authReady, isLoading, isLoadingAuth, isSwitchingAccount,
+    session, authReady, bootReady, isLoading, isLoadingAuth, isSwitchingAccount,
     authMode, setAuthMode, userRole, setUserRole, userGoal,
     name, setName, email, setEmail, password, setPassword, confirmPassword, setConfirmPassword,
     goal, workoutsPerWeek, setWorkoutsPerWeek,

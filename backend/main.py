@@ -65,12 +65,13 @@ class NotifyRequest(BaseModel):
 # Лёгкие health-роуты: ничего не вызывают (ни DeepSeek, ни Supabase), отвечают мгновенно.
 # Нужны, чтобы (1) фронт «будил» Render при старте и (2) внешний бесплатный пингер
 # (UptimeRobot/cron-job.org) держал сервер живым, не давая ему заснуть.
-@app.get("/")
+# GET и HEAD: аптайм-мониторы часто шлют HEAD, а на чистый @app.get он отдаёт 405.
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {"status": "ok"}
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}
 

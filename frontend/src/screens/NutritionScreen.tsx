@@ -44,7 +44,7 @@ export default function NutritionScreen() {
 
   return (
     <View style={styles.mainContent}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} translucent={false} />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <View style={styles.header}>
         <View style={{ flex: 1, marginRight: 15 }}><Text style={styles.pageTitle} numberOfLines={1}>Питание</Text></View>
         <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>

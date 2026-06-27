@@ -117,7 +117,7 @@ export default function WorkoutScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.mainContent} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} translucent={false} />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <View style={styles.header}>
         <View style={{ flex: 1, marginRight: 15 }}><Text style={styles.pageTitle} numberOfLines={1}>Личный Журнал</Text></View>
         <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>

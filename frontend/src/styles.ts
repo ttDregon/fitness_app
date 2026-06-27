@@ -1,5 +1,5 @@
 import { StyleSheet, Platform } from 'react-native';
-import { COLORS } from './theme';
+import { COLORS, TOP_INSET } from './theme';
 
 export const styles = StyleSheet.create({
   authContainer: { flex: 1, justifyContent: 'center', padding: 25, backgroundColor: 'transparent' },
@@ -26,7 +26,7 @@ export const styles = StyleSheet.create({
 
   containerApp: { flex: 1, backgroundColor: COLORS.bg },
   contentArea: { flex: 1 },
-  mainContent: { flexGrow: 1, padding: 20, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: 110 },
+  mainContent: { flexGrow: 1, padding: 20, paddingTop: Platform.OS === 'ios' ? 60 : TOP_INSET + 16, paddingBottom: 110 },
   centerView: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   placeholderText: { fontSize: 16, color: COLORS.textSecondary, textAlign: 'center', marginTop: 15, lineHeight: 24 },
 
@@ -80,7 +80,7 @@ export const styles = StyleSheet.create({
 
   // --- Модальное окно веса ---
   wmOverlay: { flex: 1, backgroundColor: COLORS.bg },
-  wmHeader: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, alignItems: 'center' as const, paddingHorizontal: 25, paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingBottom: 20 },
+  wmHeader: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, alignItems: 'center' as const, paddingHorizontal: 25, paddingTop: Platform.OS === 'ios' ? 60 : TOP_INSET + 16, paddingBottom: 20 },
   wmTitle: { fontSize: 32, fontWeight: '900' as const, color: COLORS.textPrimary, letterSpacing: -0.5 },
   wmSubtitle: { fontSize: 14, color: COLORS.textSecondary, marginTop: 4, fontWeight: '600' as const },
   wmCloseBtn: { width: 44, height: 44, backgroundColor: COLORS.card, borderRadius: 22, alignItems: 'center' as const, justifyContent: 'center' as const, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
@@ -125,7 +125,7 @@ export const styles = StyleSheet.create({
   groupSquareText: { marginTop: 15, fontSize: 18, fontWeight: '800', color: COLORS.textPrimary, paddingHorizontal: 10, textAlign: 'center' },
 
   groupDetailContainer: { flex: 1, backgroundColor: COLORS.bg },
-  groupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 25, paddingTop: Platform.OS === 'ios' ? 60 : 40, backgroundColor: COLORS.card, borderBottomLeftRadius: 30, borderBottomRightRadius: 30, elevation: 5 },
+  groupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 25, paddingTop: Platform.OS === 'ios' ? 60 : TOP_INSET + 16, backgroundColor: COLORS.card, borderBottomLeftRadius: 30, borderBottomRightRadius: 30, elevation: 5 },
   groupHeaderTitle: { flex: 1, fontSize: 26, fontWeight: '900', color: COLORS.textPrimary, textAlign: 'center', paddingHorizontal: 15, letterSpacing: -0.5 },
   memberCard: { backgroundColor: COLORS.card, padding: 20, borderRadius: 24, marginBottom: 15, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: COLORS.borderSoft },
   memberName: { fontSize: 18, fontWeight: '800', color: COLORS.textPrimary },
@@ -145,7 +145,7 @@ export const styles = StyleSheet.create({
   emptyCardList: { padding: 30, borderRadius: 24, alignItems: 'center', marginTop: 30, backgroundColor: 'rgba(255,255,255,0.02)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
   deleteBtn: { padding: 8, backgroundColor: 'rgba(239, 68, 68, 0.1)', borderRadius: 12 },
 
-  modalOverlayFull: { flex: 1, backgroundColor: COLORS.bg, paddingTop: Platform.OS === 'ios' ? 60 : 40 },
+  modalOverlayFull: { flex: 1, backgroundColor: COLORS.bg, paddingTop: Platform.OS === 'ios' ? 60 : TOP_INSET + 16 },
   modalContentFull: { flex: 1, backgroundColor: COLORS.bg, borderTopLeftRadius: 35, borderTopRightRadius: 35, padding: 25 },
   modalHeaderFull: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)', paddingBottom: 20, marginBottom: 15 },
   modalTitleFull: { fontSize: 26, fontWeight: '900', color: COLORS.textPrimary, letterSpacing: -0.5 },
@@ -161,7 +161,7 @@ export const styles = StyleSheet.create({
 
   sideMenuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', flexDirection: 'row', justifyContent: 'flex-start' }, // Changed to slide from left
   sideMenuCloseArea: { flex: 1 },
-  sideMenuContent: { width: '80%', maxWidth: 350, backgroundColor: COLORS.card, height: '100%', padding: 25, paddingTop: Platform.OS === 'ios' ? 70 : 50, borderTopRightRadius: 35, borderBottomRightRadius: 35 },
+  sideMenuContent: { width: '80%', maxWidth: 350, backgroundColor: COLORS.card, height: '100%', padding: 25, paddingTop: Platform.OS === 'ios' ? 70 : TOP_INSET + 26, borderTopRightRadius: 35, borderBottomRightRadius: 35 },
   sideMenuHeader: { alignItems: 'center', marginBottom: 30, paddingBottom: 30, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
   sideMenuName: { fontSize: 24, fontWeight: '900', color: COLORS.textPrimary, marginTop: 15, textAlign: 'center', letterSpacing: -0.5 },
   sideMenuRole: { fontSize: 15, color: COLORS.textSecondary, marginTop: 6, fontWeight: '600' },
@@ -210,7 +210,7 @@ export const styles = StyleSheet.create({
   editIconBtn: { position: 'absolute', bottom: -12, left: -12, backgroundColor: COLORS.card, borderRadius: 16, width: 32, height: 32, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
 
   chatSidebarOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', flexDirection: 'row' },
-  chatSidebarContent: { width: '80%', maxWidth: 350, backgroundColor: COLORS.card, height: '100%', padding: 25, paddingTop: Platform.OS === 'ios' ? 60 : 40, borderTopRightRadius: 35, borderBottomRightRadius: 35 },
+  chatSidebarContent: { width: '80%', maxWidth: 350, backgroundColor: COLORS.card, height: '100%', padding: 25, paddingTop: Platform.OS === 'ios' ? 60 : TOP_INSET + 16, borderTopRightRadius: 35, borderBottomRightRadius: 35 },
   chatSidebarCloseArea: { flex: 1 },
   newChatBtnSidebar: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.tabBar, padding: 18, borderRadius: 20, marginBottom: 35, justifyContent: 'center' },
   newChatBtnTextSidebar: { color: '#fff', fontSize: 18, fontWeight: '800', marginLeft: 12 },

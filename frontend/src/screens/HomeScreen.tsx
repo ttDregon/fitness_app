@@ -215,7 +215,7 @@ export default function HomeScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.mainContent} showsVerticalScrollIndicator={false}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} translucent={false} />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <View style={styles.header}>
         <View style={{ flex: 1, marginRight: 15 }}>
           <Text style={styles.greeting} numberOfLines={1}>Привет, {displayName}! 👋</Text>

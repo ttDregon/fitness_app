@@ -10,7 +10,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.mainContent}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} translucent={false} />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => menuNavigate('home')} style={{padding: 5}}><Ionicons name="arrow-back" size={32} color={COLORS.textPrimary} /></TouchableOpacity>
         <Text style={[styles.pageTitle, {flex: 1, textAlign: 'center', marginRight: 42}]}>Настройки</Text>

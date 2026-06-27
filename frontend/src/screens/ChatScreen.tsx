@@ -84,7 +84,7 @@ export default function ChatScreen() {
 
   return (
     <View style={styles.mainContent}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} translucent={false} />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => setIsChatSidebarVisible(true)} style={{padding: 5, marginRight: 15}}>
            <Ionicons name="menu" size={32} color={COLORS.textPrimary} />

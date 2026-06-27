@@ -1,4 +1,4 @@
-import { Dimensions } from 'react-native';
+import { Dimensions, Platform, StatusBar } from 'react-native';
 
 /**
  * Палитра «Aurora» — глубокий сине-фиолетовый фон с многоцветными акцентами.
@@ -84,3 +84,7 @@ export const GRADIENTS = {
 export type GradientKey = keyof typeof GRADIENTS;
 
 export const screenWidth = Dimensions.get('window').width;
+
+// Высота системной полосы статуса. Статус-бар сделан прозрачным (аврора уходит под него),
+// поэтому контент нужно опускать на эту высоту, чтобы заголовки не лезли под часы/чёлку.
+export const TOP_INSET = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) : 47;

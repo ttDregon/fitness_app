@@ -40,7 +40,7 @@ export default function MainShell() {
 
   return (
     <ScreenBackground>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} translucent={false} />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <Animated.View style={[styles.contentArea, { opacity: contentFadeAnim }]}>
         <TabErrorBoundary key={`${currentTab}_${activeGroup?.id || 'none'}`} onReset={() => { setActiveGroup(null); setCurrentTab('home'); }}>
           {renderContent()}

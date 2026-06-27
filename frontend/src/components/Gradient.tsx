@@ -1,5 +1,5 @@
-import React, { useRef } from 'react';
-import { View, TouchableOpacity, StyleSheet, StyleProp, ViewStyle } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, TouchableOpacity, StyleSheet, StyleProp, ViewStyle, Dimensions } from 'react-native';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, RadialGradient as SvgRadialGradient, Stop, Rect } from 'react-native-svg';
 import { COLORS, GRADIENTS } from '../theme';
 
@@ -115,28 +115,52 @@ export function GradientButton({
  * Один компонент даёт всему экрану множество оттенков сразу.
  */
 export function ScreenBackground({ children, style }: { children?: React.ReactNode; style?: StyleProp<ViewStyle> }) {
+  // Явно меряем контейнер: на Android <Svg height="100%"> внутри flex-контейнера
+  // считает высоту неверно (≈по ширине) и фон обрезается на середине высокого экрана.
+  const win = Dimensions.get('window');
+  const [size, setSize] = useState({ w: win.width, h: win.height });
   return (
-    <View style={[styles.bgRoot, style]}>
+    <View
+      style={[styles.bgRoot, style]}
+      onLayout={e => {
+        const { width, height } = e.nativeEvent.layout;
+        if (width > 0 && height > 0 && (Math.abs(width - size.w) > 1 || Math.abs(height - size.h) > 1)) {
+          setSize({ w: width, h: height });
+        }
+      }}
+    >
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        <Svg width="100%" height="100%">
+        <Svg width={size.w} height={size.h}>
           <Defs>
-            <SvgRadialGradient id="aurora1" cx="12%" cy="-2%" r="60%">
-              <Stop offset="0" stopColor={GRADIENTS.auroraA} stopOpacity={0.28} />
+            {/* Вертикальная основа — лёгкий перелив по всей высоте, без плоской зоны */}
+            <SvgLinearGradient id="auroraBase" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor="#14182F" stopOpacity={1} />
+              <Stop offset="0.45" stopColor={COLORS.bg} stopOpacity={1} />
+              <Stop offset="1" stopColor="#0E1124" stopOpacity={1} />
+            </SvgLinearGradient>
+            {/* Цветные свечения — и сверху, и снизу */}
+            <SvgRadialGradient id="aurora1" cx="12%" cy="0%" r="55%">
+              <Stop offset="0" stopColor={GRADIENTS.auroraA} stopOpacity={0.32} />
               <Stop offset="1" stopColor={GRADIENTS.auroraA} stopOpacity={0} />
             </SvgRadialGradient>
-            <SvgRadialGradient id="aurora2" cx="98%" cy="8%" r="55%">
-              <Stop offset="0" stopColor={GRADIENTS.auroraB} stopOpacity={0.20} />
+            <SvgRadialGradient id="aurora2" cx="100%" cy="6%" r="50%">
+              <Stop offset="0" stopColor={GRADIENTS.auroraB} stopOpacity={0.22} />
               <Stop offset="1" stopColor={GRADIENTS.auroraB} stopOpacity={0} />
             </SvgRadialGradient>
-            <SvgRadialGradient id="aurora3" cx="85%" cy="102%" r="65%">
-              <Stop offset="0" stopColor={GRADIENTS.auroraC} stopOpacity={0.16} />
+            <SvgRadialGradient id="aurora3" cx="6%" cy="80%" r="55%">
+              <Stop offset="0" stopColor={GRADIENTS.auroraC} stopOpacity={0.20} />
               <Stop offset="1" stopColor={GRADIENTS.auroraC} stopOpacity={0} />
             </SvgRadialGradient>
+            <SvgRadialGradient id="aurora4" cx="96%" cy="100%" r="60%">
+              <Stop offset="0" stopColor={COLORS.indigo} stopOpacity={0.22} />
+              <Stop offset="1" stopColor={COLORS.indigo} stopOpacity={0} />
+            </SvgRadialGradient>
           </Defs>
-          <Rect x="0" y="0" width="100%" height="100%" fill={COLORS.bg} />
-          <Rect x="0" y="0" width="100%" height="100%" fill="url(#aurora1)" />
-          <Rect x="0" y="0" width="100%" height="100%" fill="url(#aurora2)" />
-          <Rect x="0" y="0" width="100%" height="100%" fill="url(#aurora3)" />
+          <Rect x={0} y={0} width={size.w} height={size.h} fill="url(#auroraBase)" />
+          <Rect x={0} y={0} width={size.w} height={size.h} fill="url(#aurora1)" />
+          <Rect x={0} y={0} width={size.w} height={size.h} fill="url(#aurora2)" />
+          <Rect x={0} y={0} width={size.w} height={size.h} fill="url(#aurora3)" />
+          <Rect x={0} y={0} width={size.w} height={size.h} fill="url(#aurora4)" />
         </Svg>
       </View>
       {children}

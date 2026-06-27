@@ -1,5 +1,5 @@
 import React from 'react';
-import { Platform, UIManager, LogBox, ActivityIndicator, Text, TextInput } from 'react-native';
+import { Platform, UIManager, LogBox, ActivityIndicator, Text, TextInput, StatusBar } from 'react-native';
 import { AppProvider, useApp } from './src/context/AppContext';
 import AuthScreen from './src/screens/AuthScreen';
 import MainShell from './src/screens/MainShell';
@@ -32,12 +32,18 @@ function Root() {
   if (isSwitchingAccount) {
     return (
       <ScreenBackground style={{ justifyContent: 'center', alignItems: 'center' }}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
         <ActivityIndicator size="large" color={COLORS.accentHover} />
       </ScreenBackground>
     );
   }
 
-  if (!session) return <ScreenBackground><AuthScreen /></ScreenBackground>;
+  if (!session) return (
+    <ScreenBackground>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <AuthScreen />
+    </ScreenBackground>
+  );
 
   return <MainShell />;
 }

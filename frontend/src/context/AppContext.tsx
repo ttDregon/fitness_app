@@ -13,6 +13,8 @@ import type {
 
 function useAppController() {
   const [session, setSession] = useState<Session | null>(null);
+  // false, пока не проверили сохранённую сессию — чтобы при старте не мелькал экран входа.
+  const [authReady, setAuthReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(false);
   const [isSwitchingAccount, setIsSwitchingAccount] = useState(false);
@@ -223,7 +225,7 @@ function useAppController() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session?.user?.user_metadata?.role) setUserRole(session.user.user_metadata.role);
-    });
+    }).finally(() => setAuthReady(true));
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session?.user?.user_metadata?.role) setUserRole(session.user.user_metadata.role);
@@ -1332,7 +1334,7 @@ function useAppController() {
 
   return {
     // session / auth
-    session, isLoading, isLoadingAuth, isSwitchingAccount,
+    session, authReady, isLoading, isLoadingAuth, isSwitchingAccount,
     authMode, setAuthMode, userRole, setUserRole, userGoal,
     name, setName, email, setEmail, password, setPassword, confirmPassword, setConfirmPassword,
     goal, workoutsPerWeek, setWorkoutsPerWeek,

@@ -27,9 +27,11 @@ LogBox.ignoreLogs([
 ]);
 
 function Root() {
-  const { isSwitchingAccount, session } = useApp();
+  const { isSwitchingAccount, session, authReady } = useApp();
 
-  if (isSwitchingAccount) {
+  // Пока не проверена сохранённая сессия (или идёт смена аккаунта) — показываем заставку,
+  // а не экран входа. Иначе при холодном старте на миг мелькает окно входа.
+  if (isSwitchingAccount || !authReady) {
     return (
       <ScreenBackground style={{ justifyContent: 'center', alignItems: 'center' }}>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />

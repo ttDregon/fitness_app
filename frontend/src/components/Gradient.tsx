@@ -115,22 +115,25 @@ export function GradientButton({
  * Один компонент даёт всему экрану множество оттенков сразу.
  */
 export function ScreenBackground({ children, style }: { children?: React.ReactNode; style?: StyleProp<ViewStyle> }) {
-  // Явно меряем контейнер: на Android <Svg height="100%"> внутри flex-контейнера
-  // считает высоту неверно (≈по ширине) и фон обрезается на середине высокого экрана.
+  // Рисуем SVG с ЯВНЫМ пиксельным размером во весь экран. На Android <Svg height="100%">
+  // внутри flex-контейнера считает высоту неверно (≈по ширине) и фон обрезается посередине.
+  // Берём максимум из window/screen + запас и клипуем overflow — гарантированно во всю высоту
+  // на любом устройстве, без зависимости от тайминга onLayout.
   const win = Dimensions.get('window');
-  const [size, setSize] = useState({ w: win.width, h: win.height });
+  const scr = Dimensions.get('screen');
+  const [layoutH, setLayoutH] = useState(0);
+  const w = Math.ceil(Math.max(win.width, scr.width)) + 2;
+  const h = Math.ceil(Math.max(win.height, scr.height, layoutH)) + 2;
   return (
     <View
       style={[styles.bgRoot, style]}
       onLayout={e => {
-        const { width, height } = e.nativeEvent.layout;
-        if (width > 0 && height > 0 && (Math.abs(width - size.w) > 1 || Math.abs(height - size.h) > 1)) {
-          setSize({ w: width, h: height });
-        }
+        const hh = e.nativeEvent.layout.height;
+        if (hh > layoutH + 1) setLayoutH(hh);
       }}
     >
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-        <Svg width={size.w} height={size.h}>
+        <Svg width={w} height={h}>
           <Defs>
             {/* Вертикальная основа — лёгкий перелив по всей высоте, без плоской зоны */}
             <SvgLinearGradient id="auroraBase" x1="0" y1="0" x2="0" y2="1">
@@ -156,11 +159,11 @@ export function ScreenBackground({ children, style }: { children?: React.ReactNo
               <Stop offset="1" stopColor={COLORS.indigo} stopOpacity={0} />
             </SvgRadialGradient>
           </Defs>
-          <Rect x={0} y={0} width={size.w} height={size.h} fill="url(#auroraBase)" />
-          <Rect x={0} y={0} width={size.w} height={size.h} fill="url(#aurora1)" />
-          <Rect x={0} y={0} width={size.w} height={size.h} fill="url(#aurora2)" />
-          <Rect x={0} y={0} width={size.w} height={size.h} fill="url(#aurora3)" />
-          <Rect x={0} y={0} width={size.w} height={size.h} fill="url(#aurora4)" />
+          <Rect x={0} y={0} width={w} height={h} fill="url(#auroraBase)" />
+          <Rect x={0} y={0} width={w} height={h} fill="url(#aurora1)" />
+          <Rect x={0} y={0} width={w} height={h} fill="url(#aurora2)" />
+          <Rect x={0} y={0} width={w} height={h} fill="url(#aurora3)" />
+          <Rect x={0} y={0} width={w} height={h} fill="url(#aurora4)" />
         </Svg>
       </View>
       {children}
@@ -171,5 +174,5 @@ export function ScreenBackground({ children, style }: { children?: React.ReactNo
 const styles = StyleSheet.create({
   clip: { overflow: 'hidden' },
   disabled: { opacity: 0.55 },
-  bgRoot: { flex: 1, backgroundColor: COLORS.bg },
+  bgRoot: { flex: 1, backgroundColor: COLORS.bg, overflow: 'hidden' },
 });

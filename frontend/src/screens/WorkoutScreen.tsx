@@ -19,6 +19,8 @@ const newBlock = (name: string): BBlock => ({ id: uid('b'), exercise: name, sets
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// Первая буква названия упражнения — всегда заглавная (для отображения).
+const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 export default function WorkoutScreen() {
   const { handleTabChange, sendToAI, isLoading, history, addStructuredWorkout } = useApp();
@@ -36,7 +38,7 @@ export default function WorkoutScreen() {
   const toggleSelect = (name: string) =>
     setSelected(prev => (prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]));
   const addCustomToSelection = () => {
-    const n = customName.trim();
+    const n = cap(customName.trim());
     if (!n) return;
     setSelected(prev => (prev.includes(n) ? prev : [...prev, n]));
     setCustomName('');
@@ -134,7 +136,7 @@ export default function WorkoutScreen() {
         <View key={block.id} style={blockCard}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
             <Ionicons name="barbell" size={20} color={COLORS.amber} style={{ marginRight: 8 }} />
-            <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 17, fontWeight: '800' }} numberOfLines={2}>{block.exercise}</Text>
+            <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 17, fontWeight: '800' }} numberOfLines={2}>{cap(block.exercise)}</Text>
             <TouchableOpacity onPress={() => removeBlock(block.id)} style={{ padding: 4 }}><Ionicons name="trash-outline" size={20} color={COLORS.error} /></TouchableOpacity>
           </View>
 
@@ -187,7 +189,7 @@ export default function WorkoutScreen() {
         <View style={styles.historyCard}>
           {dayData.map((group: GroupedWorkout, gIdx: number) => (
             <View key={gIdx} style={{ marginTop: gIdx === 0 ? 0 : 18 }}>
-              <Text style={styles.groupExerciseTitle}>{group.exercise}</Text>
+              <Text style={styles.groupExerciseTitle}>{cap(group.exercise)}</Text>
               {group.sets.map((item: WorkoutData, index: number) => (
                 <View key={index} style={[styles.setRow, { paddingLeft: 10 }]}><Text style={styles.exerciseSetText}>Подход {index + 1}</Text><Text style={styles.setDetails}>{item.weight}кг × {item.reps}</Text></View>
               ))}

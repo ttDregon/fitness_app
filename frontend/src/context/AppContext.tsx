@@ -766,7 +766,14 @@ function useAppController() {
       closeAnimatedModal(setIsSchedulingVisible); fetchUpcomingSessions(); setSchedSelectedGroup(null); setSchedSelectedMember(null);
     }
   };
-  const deleteSession = async (id: string) => { const { error } = await supabase.from('training_sessions').delete().eq('id', id); if (!error) fetchUpcomingSessions(); };
+  const deleteSession = async (id: string) => {
+    const sess = upcomingSessions.find((s: TrainingSession) => s.id === id);
+    const { error } = await supabase.from('training_sessions').delete().eq('id', id);
+    if (!error) {
+      if (sess?.client_id) notifyUser(sess.client_id, 'Запись отменена 📅', `${sess.session_date} в ${sess.session_time} — отменена`, { tab: 'home' });
+      fetchUpcomingSessions();
+    }
+  };
 
   const loadMyDayPlan = async (date: string) => {
     if (!session?.user?.id || !activeGroup?.id) { setMyDayPlan(null); return; }

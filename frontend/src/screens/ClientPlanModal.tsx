@@ -6,7 +6,7 @@ import { GradientButton } from '../components/Gradient';
 import { styles } from '../styles';
 import { COLORS, GRADIENTS } from '../theme';
 import { supabase } from '../lib/supabase';
-import { parseMeals } from '../api/backend';
+import { parseMeals, notifyUser } from '../api/backend';
 import { groupWorkoutData } from '../utils/workout';
 import { getCurrentDateString } from '../utils/date';
 import { useApp } from '../context/AppContext';
@@ -73,6 +73,8 @@ export default function ClientPlanModal() {
   const [mealPreviewLoading, setMealPreviewLoading] = useState<boolean>(false);
   const [dayMeals, setDayMeals] = useState<MealItem[]>([]);
   const [eatenLog, setEatenLog] = useState<MealLogRow[]>([]);
+  // Меню меняли в этой сессии модалки → один пуш клиенту при закрытии (без спама на каждое блюдо).
+  const [mealsTouched, setMealsTouched] = useState(false);
 
   const periodDays = PERIODS.find(p => p.key === period)?.days || 1;
   const nutritionDate = addDays(startDate, dayIndex);
@@ -122,12 +124,14 @@ export default function ClientPlanModal() {
     setDayMeals(updated);
     setMealInput('');
     setMealPreview(null);
+    setMealsTouched(true);
     await persistMeals(updated);
   };
 
   const removeMeal = async (id: string) => {
     const updated = dayMeals.filter(m => m.id !== id);
     setDayMeals(updated);
+    setMealsTouched(true);
     await persistMeals(updated);
   };
 
@@ -140,7 +144,13 @@ export default function ClientPlanModal() {
     }
   };
 
-  const close = () => closeAnimatedModal(() => setSelectedMember(null));
+  const close = () => {
+    if (mealsTouched && selectedMember?.id) {
+      notifyUser(selectedMember.id, 'Меню питания обновлено 🥗', 'Тренер обновил твоё меню', { tab: 'nutrition' });
+    }
+    setMealsTouched(false);
+    closeAnimatedModal(() => setSelectedMember(null));
+  };
 
   if (!selectedMember) return null;
 

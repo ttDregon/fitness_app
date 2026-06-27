@@ -29,6 +29,10 @@
       "package": "com.ttdregon.mysafeapp",
       "googleServicesFile": "./google-services.json"
     },
+    "androidNavigationBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#0A0C16"
+    },
     "web": {
       "favicon": "./assets/favicon.png"
     },

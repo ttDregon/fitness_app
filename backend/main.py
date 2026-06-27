@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
@@ -53,6 +54,12 @@ class ChatRequest(BaseModel):
 class WorkoutLossPayload(BaseModel):
     weight: float
     exercises: list
+
+class NotifyRequest(BaseModel):
+    to_user_id: str
+    title: str
+    body: str
+    data: Optional[dict] = None
 
 
 # Лёгкие health-роуты: ничего не вызывают (ни DeepSeek, ни Supabase), отвечают мгновенно.
@@ -197,6 +204,42 @@ async def calculate_loss(payload: WorkoutLossPayload):
         "burned_kcal": burned_kcal,
         "weight_loss_kg": round(weight_loss_kg, 3)
     }
+
+
+@app.post("/notify")
+async def notify(req: NotifyRequest):
+    """Отправить пуш-уведомление пользователю через Expo Push API.
+
+    Берём все push-токены пользователя из таблицы push_tokens и шлём сообщение.
+    Требует, чтобы SUPABASE_KEY на бэкенде имел право читать чужие токены
+    (service_role ключ либо соответствующая RLS-политика).
+    """
+    try:
+        res = supabase.table("push_tokens").select("token").eq("user_id", req.to_user_id).execute()
+        tokens = [r["token"] for r in (res.data or []) if r.get("token", "").startswith("Expo")]
+        if not tokens:
+            return {"status": "no_tokens", "sent": 0}
+
+        messages = [{
+            "to": t,
+            "title": req.title,
+            "body": req.body,
+            "data": req.data or {},
+            "sound": "default",
+            "channelId": "default",
+            "priority": "high",
+        } for t in tokens]
+
+        async with httpx.AsyncClient(timeout=15) as http:
+            resp = await http.post(
+                "https://exp.host/--/api/v2/push/send",
+                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                json=messages,
+            )
+        return {"status": "ok", "sent": len(tokens), "expo": resp.json()}
+    except Exception as e:
+        print(f"❌ Ошибка отправки пуша: {e}")
+        return {"status": "error", "detail": str(e)}
 
 
 @app.post("/chat")

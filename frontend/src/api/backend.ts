@@ -55,6 +55,18 @@ export async function calculateLoss(weight: number, exercises: WorkoutData[]): P
   return response.json();
 }
 
+// Отправить пуш конкретному пользователю (через бэкенд → Expo Push API).
+// Fire-and-forget: любые ошибки глушим, чтобы не ломать основной поток.
+export async function notifyUser(toUserId: string, title: string, body: string, data: Record<string, any> = {}): Promise<void> {
+  try {
+    await fetch(`${getBackendUrl()}/notify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to_user_id: toUserId, title, body, data }),
+    });
+  } catch {}
+}
+
 // Чат с ИИ -> { reply, calories, protein, fat, carbs }
 export async function sendChat(messages: { role: string; content: string }[], userId?: string): Promise<any> {
   const response = await fetch(`${getBackendUrl()}/chat`, {

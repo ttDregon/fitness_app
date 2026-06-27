@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, LayoutAnimation } from 'react-native';
 import { ScrollPicker } from '../components/ScrollPicker';
+import { GradientButton } from '../components/Gradient';
 import { ageData, heightWholeData, weightWholeData, decimalsData } from '../utils/pickers';
 import { styles } from '../styles';
-import { COLORS } from '../theme';
+import { COLORS, GRADIENTS } from '../theme';
 import { useApp } from '../context/AppContext';
 
 export default function AuthScreen() {
@@ -25,9 +26,9 @@ export default function AuthScreen() {
         <Text style={styles.subtitle}>Вход в систему</Text>
         <TextInput style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textSecondary} value={email} onChangeText={setEmail} autoCapitalize="none" />
         <TextInput style={styles.input} placeholder="Пароль" placeholderTextColor={COLORS.textSecondary} secureTextEntry value={password} onChangeText={setPassword} />
-        <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={isLoadingAuth}>
+        <GradientButton colors={GRADIENTS.primary} style={styles.button} onPress={handleLogin} disabled={isLoadingAuth}>
           {isLoadingAuth ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Войти</Text>}
-        </TouchableOpacity>
+        </GradientButton>
         <TouchableOpacity onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setAuthMode('role_select'); }} style={{marginTop: 30}}>
           <Text style={styles.linkText}>Нет аккаунта? Зарегистрироваться</Text>
         </TouchableOpacity>
@@ -39,8 +40,8 @@ export default function AuthScreen() {
       <View style={styles.authContainer}>
         <Text style={styles.title}>Новый аккаунт</Text>
         <Text style={styles.subtitle}>Выберите свою роль</Text>
-        <TouchableOpacity style={styles.choiceButton} onPress={() => { smoothStateUpdate(() => { setUserRole('client'); setAuthMode('register_credentials'); }); }}><Text style={styles.buttonText}>Я Клиент</Text></TouchableOpacity>
-        <TouchableOpacity style={[styles.choiceButton, {backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)'}]} onPress={() => { smoothStateUpdate(() => { setUserRole('trainer'); setAuthMode('register_credentials'); }); }}><Text style={[styles.buttonText, {color: COLORS.textPrimary}]}>Я Тренер</Text></TouchableOpacity>
+        <GradientButton colors={GRADIENTS.violetIndigo} style={styles.choiceButton} onPress={() => { smoothStateUpdate(() => { setUserRole('client'); setAuthMode('register_credentials'); }); }}><Text style={styles.buttonText}>Я Клиент</Text><Text style={styles.subText}>Тренируюсь по плану</Text></GradientButton>
+        <TouchableOpacity style={[styles.choiceButton, {backgroundColor: COLORS.cardAlt, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.35)'}]} onPress={() => { smoothStateUpdate(() => { setUserRole('trainer'); setAuthMode('register_credentials'); }); }}><Text style={[styles.buttonText, {color: COLORS.textPrimary}]}>Я Тренер</Text><Text style={[styles.subText, {color: COLORS.textSecondary}]}>Веду клиентов</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode('login')); }} style={styles.backButton}><Text style={styles.backButtonText}>← Вернуться ко входу</Text></TouchableOpacity>
       </View>
     );
@@ -54,9 +55,9 @@ export default function AuthScreen() {
         <TextInput style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textSecondary} value={email} onChangeText={setEmail} autoCapitalize="none" />
         <TextInput style={styles.input} placeholder="Пароль" placeholderTextColor={COLORS.textSecondary} secureTextEntry value={password} onChangeText={setPassword} />
         <TextInput style={[styles.input, !passwordsMatch && styles.inputError]} placeholderTextColor={COLORS.textSecondary} placeholder="Подтвердите пароль" secureTextEntry value={confirmPassword} onChangeText={setConfirmPassword} />
-        <TouchableOpacity style={[styles.button, {marginTop: 15}]} onPress={handleCredentialsNext} disabled={isLoadingAuth || !passwordsMatch}>
+        <GradientButton colors={GRADIENTS.primary} style={[styles.button, {marginTop: 15}]} onPress={handleCredentialsNext} disabled={isLoadingAuth || !passwordsMatch}>
           {isLoadingAuth ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Далее →</Text>}
-        </TouchableOpacity>
+        </GradientButton>
         <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode('role_select')); }} style={styles.backButton}><Text style={styles.backButtonText}>← К выбору роли</Text></TouchableOpacity>
       </View>
     );
@@ -82,7 +83,7 @@ export default function AuthScreen() {
           <Text style={{fontSize: 34, fontWeight: '800', marginHorizontal: 5, color: COLORS.tabBar}}>.</Text>
           <ScrollPicker items={decimalsData} selectedValue={targetWeightDec} onValueChange={(val: string | number) => setTargetWeightDec(val as string)} width={80} textColor={COLORS.textPrimary} />
         </View>
-        <TouchableOpacity style={[styles.button, {marginTop: 15}]} onPress={() => { smoothStateUpdate(() => setAuthMode('register_frequency')); }}><Text style={styles.buttonText}>Далее →</Text></TouchableOpacity>
+        <GradientButton colors={GRADIENTS.primary} style={[styles.button, {marginTop: 15}]} onPress={() => { smoothStateUpdate(() => setAuthMode('register_frequency')); }}><Text style={styles.buttonText}>Далее →</Text></GradientButton>
         <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode('register_goal')); }} style={styles.backButton}><Text style={styles.backButtonText}>← Назад</Text></TouchableOpacity>
       </View>
     );
@@ -96,14 +97,14 @@ export default function AuthScreen() {
           <TouchableOpacity style={[styles.wizardSquareBtn, workoutsPerWeek === '3-4' && styles.wizardSquareBtnActive]} onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setWorkoutsPerWeek('3-4'); }}><Text style={[styles.wizardSquareText, workoutsPerWeek === '3-4' && {color: '#fff'}]}>3-4</Text></TouchableOpacity>
           <TouchableOpacity style={[styles.wizardSquareBtn, workoutsPerWeek === '5+' && styles.wizardSquareBtnActive]} onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setWorkoutsPerWeek('5+'); }}><Text style={[styles.wizardSquareText, workoutsPerWeek === '5+' && {color: '#fff'}]}>5+</Text></TouchableOpacity>
         </View>
-        <TouchableOpacity style={[styles.button, {marginTop: 10}]} onPress={() => { smoothStateUpdate(() => setAuthMode('register_metrics')); }} disabled={!workoutsPerWeek}><Text style={styles.buttonText}>Далее →</Text></TouchableOpacity>
+        <GradientButton colors={GRADIENTS.primary} style={[styles.button, {marginTop: 10}]} onPress={() => { smoothStateUpdate(() => setAuthMode('register_metrics')); }} disabled={!workoutsPerWeek}><Text style={styles.buttonText}>Далее →</Text></GradientButton>
         <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode(goal === 'maintain' ? 'register_goal' : 'register_target_weight')); }} style={styles.backButton}><Text style={styles.backButtonText}>← Назад</Text></TouchableOpacity>
       </View>
     );
   }
   if (authMode === 'register_metrics') {
     return (
-      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 20, backgroundColor: COLORS.bg }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 20 }}>
         <Text style={styles.title}>О вас</Text>
         <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, marginTop: 15}}>
           <TouchableOpacity style={[styles.wizardGenderBtn, userGender === 'male' && styles.wizardGenderBtnActive]} onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setUserGender('male'); }}><Text style={[styles.wizardGenderText, userGender === 'male' && {color: '#fff'}]}>Мужчина</Text></TouchableOpacity>
@@ -129,9 +130,9 @@ export default function AuthScreen() {
             <ScrollPicker items={decimalsData} selectedValue={userWeightDec} onValueChange={(val: string | number) => setUserWeightDec(val as string)} width={80} textColor={COLORS.textPrimary} />
           </View>
         </View>
-        <TouchableOpacity style={[styles.button, {marginTop: 10}]} onPress={handleFinalRegister} disabled={isLoadingAuth || !userGender}>
+        <GradientButton colors={GRADIENTS.violetPink} style={[styles.button, {marginTop: 10}]} onPress={handleFinalRegister} disabled={isLoadingAuth || !userGender}>
           {isLoadingAuth ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Завершить регистрацию</Text>}
-        </TouchableOpacity>
+        </GradientButton>
         <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode('register_frequency')); }} style={[styles.backButton, {marginBottom: 40}]}><Text style={styles.backButtonText}>← Назад</Text></TouchableOpacity>
       </ScrollView>
     );

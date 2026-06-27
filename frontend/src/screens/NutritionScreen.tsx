@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Modal, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { GradientButton, GradientView } from '../components/Gradient';
 import { styles } from '../styles';
-import { COLORS } from '../theme';
+import { COLORS, GRADIENTS } from '../theme';
 import { useApp } from '../context/AppContext';
 import type { FoodItem, MealItem, MealLogRow } from '../types';
 
@@ -50,11 +51,14 @@ export default function NutritionScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 80 }} showsVerticalScrollIndicator={false}>
-        <View style={styles.metricCardFull}>
-          <Text style={styles.metricTitle}>Съедено за сегодня</Text>
+        <View style={[styles.metricCardFull, { alignItems: 'stretch' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+            <Ionicons name="flame" size={22} color={COLORS.emerald} style={{ marginRight: 8 }} />
+            <Text style={styles.metricTitle}>Съедено за сегодня</Text>
+          </View>
           <Text style={styles.metricValueFull}>{consumedCalories} / {dailyCalorieNorm > 0 ? dailyCalorieNorm : '--'} ккал</Text>
           <View style={[styles.progressBarBg, { width: '100%', height: 20, marginTop: 15, borderRadius: 12 }]}>
-            <View style={[styles.progressBarFill, { width: `${caloriesProgress}%`, backgroundColor: caloriesProgress >= 100 ? COLORS.error : COLORS.tabBar, borderRadius: 12 }]} />
+            <GradientView colors={caloriesProgress >= 100 ? GRADIENTS.orange : GRADIENTS.emerald} style={[styles.progressBarFill, { width: `${caloriesProgress}%`, height: 20, borderRadius: 12 }]} />
           </View>
         </View>
 
@@ -104,10 +108,10 @@ export default function NutritionScreen() {
           </View>
         )}
 
-        <TouchableOpacity style={[styles.mainActionBtn, {marginTop: 20}]} onPress={() => openAnimatedModal(setIsMealModalVisible)}>
+        <GradientButton colors={GRADIENTS.emerald} style={[styles.mainActionBtn, {marginTop: 20}]} onPress={() => openAnimatedModal(setIsMealModalVisible)}>
           <Ionicons name="add-circle" size={24} color="#fff" style={{marginRight: 10}} />
           <Text style={styles.mainActionText}>Добавить блюдо</Text>
-        </TouchableOpacity>
+        </GradientButton>
 
         {selfMealsToday.length > 0 && (
           <View style={[styles.metricCardFull, { marginTop: 20, alignItems: 'stretch' }]}>
@@ -115,7 +119,7 @@ export default function NutritionScreen() {
             {selfMealsToday.map((e: MealLogRow) => (
               <View key={e.id} style={{ width: '100%', paddingVertical: 10, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)' }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%' }}>
-                  <Ionicons name="fast-food-outline" size={18} color={COLORS.tabBar} style={{ marginRight: 8 }} />
+                  <Ionicons name="fast-food" size={18} color={COLORS.emerald} style={{ marginRight: 8 }} />
                   <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 14, fontWeight: '700' }} numberOfLines={1}>{mealTypeLabel(e.meal_type)}</Text>
                   <Text style={{ color: COLORS.textSecondary, fontSize: 13, marginLeft: 8 }}>{e.calories} ккал</Text>
                 </View>
@@ -145,15 +149,15 @@ export default function NutritionScreen() {
                 <ScrollView style={{width: '100%', marginTop: 10}} showsVerticalScrollIndicator={false}>
                    <Text style={styles.label}>Приём пищи:</Text>
                    <TouchableOpacity style={styles.pickerButton} onPress={() => setMealTypeOpen(o => !o)}>
-                     <Ionicons name="restaurant-outline" size={20} color={COLORS.tabBar} />
+                     <Ionicons name="restaurant" size={20} color={COLORS.emerald} />
                      <Text style={[styles.pickerButtonText, { flex: 1 }]}>{mealTypeLabel(mealType)}</Text>
-                     <Ionicons name={mealTypeOpen ? 'chevron-up' : 'chevron-down'} size={20} color={COLORS.tabBar} />
+                     <Ionicons name={mealTypeOpen ? 'chevron-up' : 'chevron-down'} size={20} color={COLORS.emerald} />
                    </TouchableOpacity>
                    {mealTypeOpen && (
-                     <View style={{ backgroundColor: COLORS.bg, borderRadius: 12, marginTop: 4, marginBottom: 4, overflow: 'hidden' }}>
+                     <View style={{ backgroundColor: COLORS.bgDeep, borderRadius: 12, marginTop: 4, marginBottom: 4, overflow: 'hidden' }}>
                        {MEAL_TYPES.map(mt => (
-                         <TouchableOpacity key={mt.key} onPress={() => { setMealType(mt.key); setMealTypeOpen(false); }} style={{ paddingVertical: 12, paddingHorizontal: 16, backgroundColor: mealType === mt.key ? 'rgba(139,92,246,0.15)' : 'transparent' }}>
-                           <Text style={{ color: mealType === mt.key ? COLORS.tabBar : COLORS.textPrimary, fontSize: 15, fontWeight: mealType === mt.key ? '700' : '500' }}>{mt.label}</Text>
+                         <TouchableOpacity key={mt.key} onPress={() => { setMealType(mt.key); setMealTypeOpen(false); }} style={{ paddingVertical: 12, paddingHorizontal: 16, backgroundColor: mealType === mt.key ? 'rgba(52,211,153,0.16)' : 'transparent' }}>
+                           <Text style={{ color: mealType === mt.key ? COLORS.emerald : COLORS.textPrimary, fontSize: 15, fontWeight: mealType === mt.key ? '700' : '500' }}>{mt.label}</Text>
                          </TouchableOpacity>
                        ))}
                      </View>
@@ -162,9 +166,9 @@ export default function NutritionScreen() {
                    <Text style={[styles.label, { marginTop: 10 }]}>Что я ел (можно сразу несколько: «на завтрак овсянка, на обед борщ»):</Text>
                    <TextInput style={styles.inputArea} placeholder="200г творога и кофе..." placeholderTextColor={COLORS.textSecondary} value={mealInput} onChangeText={setMealInput} multiline />
 
-                   <TouchableOpacity style={[styles.button, {marginBottom: 18}]} onPress={() => calcClientMeals(mealInput, mealType)} disabled={isMealPreviewLoading}>
+                   <GradientButton colors={GRADIENTS.emerald} style={[styles.button, {marginBottom: 18}]} onPress={() => calcClientMeals(mealInput, mealType)} disabled={isMealPreviewLoading}>
                       {isMealPreviewLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Рассчитать КБЖУ</Text>}
-                   </TouchableOpacity>
+                   </GradientButton>
 
                    {mealParse && mealParse.length > 0 && (
                       <View style={styles.previewContainer}>
@@ -182,9 +186,9 @@ export default function NutritionScreen() {
                              ))}
                            </View>
                          ))}
-                         <TouchableOpacity style={[styles.button, {marginTop: 10}]} onPress={() => { confirmClientMeals(); setMealInput(''); }}>
+                         <GradientButton colors={GRADIENTS.emerald} style={[styles.button, {marginTop: 10}]} onPress={() => { confirmClientMeals(); setMealInput(''); }}>
                             <Text style={styles.buttonText}>Добавить</Text>
-                         </TouchableOpacity>
+                         </GradientButton>
                       </View>
                    )}
                 </ScrollView>

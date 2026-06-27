@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Modal, Animated, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { GradientButton } from '../components/Gradient';
 import { styles } from '../styles';
-import { COLORS } from '../theme';
+import { COLORS, GRADIENTS } from '../theme';
 import { supabase } from '../lib/supabase';
 import { parseMeals } from '../api/backend';
 import { groupWorkoutData } from '../utils/workout';
@@ -144,7 +145,7 @@ export default function ClientPlanModal() {
   if (!selectedMember) return null;
 
   const totals = dayMeals.reduce((a, m) => ({ cal: a.cal + m.calories, p: a.p + m.protein, f: a.f + m.fat, c: a.c + m.carbs }), { cal: 0, p: 0, f: 0, c: 0 });
-  const sectionBtn = (active: boolean) => ({ flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: active ? COLORS.tabBar : COLORS.bg, borderRadius: 16, padding: 18, marginBottom: 12, borderWidth: 1, borderColor: active ? COLORS.tabBar : 'rgba(255,255,255,0.08)' });
+  const sectionBtn = (active: boolean, color: string = COLORS.violet) => ({ flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: active ? color : COLORS.cardAlt, borderRadius: 16, padding: 18, marginBottom: 12, borderWidth: 1, borderColor: active ? color : 'rgba(255,255,255,0.08)' });
 
   return (
     <Modal transparent animationType="none" onRequestClose={close}>
@@ -159,7 +160,7 @@ export default function ClientPlanModal() {
 
           <ScrollView style={{ width: '100%', marginTop: 10 }} showsVerticalScrollIndicator={false}>
             {/* ===== Кнопка ТРЕНИРОВКА ===== */}
-            <TouchableOpacity style={sectionBtn(activeSection === 'workout')} onPress={() => setActiveSection(s => s === 'workout' ? null : 'workout')}>
+            <TouchableOpacity style={sectionBtn(activeSection === 'workout', COLORS.violet)} onPress={() => setActiveSection(s => s === 'workout' ? null : 'workout')}>
               <Ionicons name="barbell" size={24} color="#fff" style={{ marginRight: 12 }} />
               <Text style={{ flex: 1, color: '#fff', fontSize: 17, fontWeight: '800' }}>Тренировка</Text>
               <Ionicons name={activeSection === 'workout' ? 'chevron-up' : 'chevron-down'} size={22} color="#fff" />
@@ -180,13 +181,13 @@ export default function ClientPlanModal() {
                 {assignDatePickerVisible && (
                   <DateTimePicker value={assignDateObj} mode="date" display="default" onChange={onAssignDateChange} />
                 )}
-                <TouchableOpacity style={[styles.button, { marginBottom: 22 }]} onPress={assignWorkoutToMember} disabled={isLoading}>{isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Добавить/Назначить</Text>}</TouchableOpacity>
+                <GradientButton colors={GRADIENTS.violet} style={[styles.button, { marginBottom: 22 }]} onPress={assignWorkoutToMember} disabled={isLoading}>{isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Добавить/Назначить</Text>}</GradientButton>
                 <Text style={styles.historyTitle}>Выполнение на {assignWorkoutDate}:</Text>
                 {(() => {
                   const plan = memberDayPlan;
                   if (!plan || !Array.isArray(plan.workout_data) || !plan.workout_data.length) return <Text style={styles.placeholderText}>План не назначен</Text>;
                   return groupWorkoutData(plan.workout_data).map((group: GroupedWorkout, gIdx: number) => (
-                    <View key={gIdx} style={{ marginBottom: 20, backgroundColor: COLORS.bg, padding: 15, borderRadius: 16 }}>
+                    <View key={gIdx} style={{ marginBottom: 20, backgroundColor: COLORS.cardAlt, padding: 15, borderRadius: 16, borderWidth: 1, borderColor: COLORS.borderSoft }}>
                       <Text style={styles.groupExerciseTitle}>{group.exercise}</Text>
                       {group.sets.map((ex: WorkoutData, idx: number) => (
                         <View key={idx} style={[styles.setRow, { paddingVertical: 10, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)', paddingLeft: 5 }]}>
@@ -201,7 +202,7 @@ export default function ClientPlanModal() {
             )}
 
             {/* ===== Кнопка ПИТАНИЕ ===== */}
-            <TouchableOpacity style={sectionBtn(activeSection === 'nutrition')} onPress={() => setActiveSection(s => s === 'nutrition' ? null : 'nutrition')}>
+            <TouchableOpacity style={sectionBtn(activeSection === 'nutrition', COLORS.emerald)} onPress={() => setActiveSection(s => s === 'nutrition' ? null : 'nutrition')}>
               <Ionicons name="restaurant" size={24} color="#fff" style={{ marginRight: 12 }} />
               <Text style={{ flex: 1, color: '#fff', fontSize: 17, fontWeight: '800' }}>Питание</Text>
               <Ionicons name={activeSection === 'nutrition' ? 'chevron-up' : 'chevron-down'} size={22} color="#fff" />
@@ -213,8 +214,8 @@ export default function ClientPlanModal() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
                   {PERIODS.map(p => (
                     <TouchableOpacity key={p.key} onPress={() => { setPeriod(p.key); setDayIndex(0); }}
-                      style={{ flex: 1, marginHorizontal: 3, paddingVertical: 9, borderRadius: 12, alignItems: 'center', backgroundColor: period === p.key ? COLORS.tabBar : COLORS.bg, borderWidth: 1, borderColor: period === p.key ? COLORS.tabBar : 'rgba(255,255,255,0.08)' }}>
-                      <Text style={{ color: period === p.key ? '#fff' : COLORS.textSecondary, fontSize: 13, fontWeight: '700' }}>{p.label}</Text>
+                      style={{ flex: 1, marginHorizontal: 3, paddingVertical: 9, borderRadius: 12, alignItems: 'center', backgroundColor: period === p.key ? COLORS.emerald : COLORS.cardAlt, borderWidth: 1, borderColor: period === p.key ? COLORS.emerald : 'rgba(255,255,255,0.08)' }}>
+                      <Text style={{ color: period === p.key ? '#06281D' : COLORS.textSecondary, fontSize: 13, fontWeight: '700' }}>{p.label}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -245,10 +246,10 @@ export default function ClientPlanModal() {
                   <Ionicons name={mealTypeOpen ? 'chevron-up' : 'chevron-down'} size={20} color={COLORS.tabBar} />
                 </TouchableOpacity>
                 {mealTypeOpen && (
-                  <View style={{ backgroundColor: COLORS.bg, borderRadius: 12, marginTop: 4, marginBottom: 4, overflow: 'hidden' }}>
+                  <View style={{ backgroundColor: COLORS.bgDeep, borderRadius: 12, marginTop: 4, marginBottom: 4, overflow: 'hidden' }}>
                     {MEAL_TYPES.map(mt => (
-                      <TouchableOpacity key={mt.key} onPress={() => { setMealType(mt.key); setMealTypeOpen(false); }} style={{ paddingVertical: 12, paddingHorizontal: 16, backgroundColor: mealType === mt.key ? 'rgba(139,92,246,0.15)' : 'transparent' }}>
-                        <Text style={{ color: mealType === mt.key ? COLORS.tabBar : COLORS.textPrimary, fontSize: 15, fontWeight: mealType === mt.key ? '700' : '500' }}>{mt.label}</Text>
+                      <TouchableOpacity key={mt.key} onPress={() => { setMealType(mt.key); setMealTypeOpen(false); }} style={{ paddingVertical: 12, paddingHorizontal: 16, backgroundColor: mealType === mt.key ? 'rgba(52,211,153,0.16)' : 'transparent' }}>
+                        <Text style={{ color: mealType === mt.key ? COLORS.emerald : COLORS.textPrimary, fontSize: 15, fontWeight: mealType === mt.key ? '700' : '500' }}>{mt.label}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
@@ -257,7 +258,7 @@ export default function ClientPlanModal() {
                 {/* Состав приёма */}
                 <Text style={[styles.label, { marginTop: 10 }]}>Что в приёме (через запятую):</Text>
                 <TextInput style={styles.inputArea} multiline placeholder="200г куриного филе, 150г пюре, огурец, сок..." placeholderTextColor={COLORS.textSecondary} value={mealInput} onChangeText={setMealInput} />
-                <TouchableOpacity style={[styles.button, { marginBottom: 14 }]} onPress={calcPreview} disabled={mealPreviewLoading}>{mealPreviewLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Рассчитать КБЖУ</Text>}</TouchableOpacity>
+                <GradientButton colors={GRADIENTS.emerald} style={[styles.button, { marginBottom: 14 }]} onPress={calcPreview} disabled={mealPreviewLoading}>{mealPreviewLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Рассчитать КБЖУ</Text>}</GradientButton>
 
                 {mealPreview && (
                   <View style={styles.previewContainer}>
@@ -271,7 +272,7 @@ export default function ClientPlanModal() {
                         <Text style={{ color: COLORS.textSecondary, fontSize: 12 }}>{it.calories} ккал · Б{it.protein} Ж{it.fat} У{it.carbs}</Text>
                       </View>
                     ))}
-                    <TouchableOpacity style={[styles.button, { marginTop: 14 }]} onPress={addMeal}><Text style={styles.buttonText}>Добавить в меню</Text></TouchableOpacity>
+                    <GradientButton colors={GRADIENTS.emerald} style={[styles.button, { marginTop: 14 }]} onPress={addMeal}><Text style={styles.buttonText}>Добавить в меню</Text></GradientButton>
                   </View>
                 )}
 
@@ -282,7 +283,7 @@ export default function ClientPlanModal() {
                 ) : (
                   <>
                     {dayMeals.map(m => (
-                      <View key={m.id} style={{ backgroundColor: COLORS.bg, borderRadius: 14, padding: 14, marginBottom: 8 }}>
+                      <View key={m.id} style={{ backgroundColor: COLORS.cardAlt, borderRadius: 14, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: COLORS.borderSoft }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                           <Ionicons name={m.eaten ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={m.eaten ? COLORS.success : COLORS.textSecondary} style={{ marginRight: 10 }} />
                           <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 15, fontWeight: '700' }}>{mealTypeLabel(m.meal_type)}{m.eaten ? ' · съедено' : ''}</Text>
@@ -337,7 +338,7 @@ export default function ClientPlanModal() {
               const done = hasTarget ? Math.abs(startW - cw) : 0;
               const pct = total > 0 ? Math.min(Math.round(done / total * 100), 100) : 0;
               return (
-                <View style={{ backgroundColor: COLORS.bg, borderRadius: 18, padding: 18, marginTop: 12, marginBottom: 20 }}>
+                <View style={{ backgroundColor: COLORS.cardAlt, borderRadius: 18, padding: 18, marginTop: 12, marginBottom: 20, borderWidth: 1, borderColor: COLORS.borderSoft }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: hasTarget ? 14 : 4 }}>
                     <Ionicons name="flag" size={18} color={COLORS.tabBar} style={{ marginRight: 8 }} />
                     <Text style={{ color: COLORS.textPrimary, fontSize: 15, fontWeight: '700' }}>Цель: {goalLabel}</Text>

@@ -1,8 +1,9 @@
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Animated, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { GradientButton } from '../components/Gradient';
 import { styles } from '../styles';
-import { COLORS } from '../theme';
+import { COLORS, GRADIENTS } from '../theme';
 import { groupWorkoutData } from '../utils/workout';
 import { getCurrentDateString } from '../utils/date';
 import { useApp } from '../context/AppContext';
@@ -44,7 +45,7 @@ export default function ClubScreen() {
             <View>
               <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
                 <Text style={styles.historyTitle}>Участники ({groupMembers.length})</Text>
-                <TouchableOpacity onPress={fetchGroupDetails}><Ionicons name="refresh" size={28} color={COLORS.tabBar} /></TouchableOpacity>
+                <TouchableOpacity onPress={fetchGroupDetails}><Ionicons name="refresh" size={28} color={COLORS.rose} /></TouchableOpacity>
               </View>
               {groupMembers.map((member: GroupMember) => {
                 if (session?.user && member.id === session.user.id) return null;
@@ -55,7 +56,7 @@ export default function ClubScreen() {
                       <Text style={styles.memberName}>{member.name || member.email}</Text>
                       <Text style={styles.memberRole}>Прогресс: {Math.round(progress)}%</Text>
                     </View>
-                    <View style={styles.progressBarBg}><View style={[styles.progressBarFill, { width: `${progress}%`, backgroundColor: progress === 100 ? COLORS.success : COLORS.tabBar }]} /></View>
+                    <View style={styles.progressBarBg}><View style={[styles.progressBarFill, { width: `${progress}%`, backgroundColor: progress === 100 ? COLORS.success : COLORS.rose }]} /></View>
                   </TouchableOpacity>
                 );
               })}
@@ -63,10 +64,10 @@ export default function ClubScreen() {
           )}
           {userRole === 'client' && (
             <View style={{marginTop: 10}}>
-              <TouchableOpacity style={styles.mainActionBtn} onPress={() => { setMyPlanViewDate(getCurrentDateString()); setMyDayPlan(null); openAnimatedModal(setIsMyWorkoutVisible); }}>
-                <Ionicons name="fitness-outline" size={24} color="#fff" style={{marginRight: 10}} />
+              <GradientButton colors={GRADIENTS.rose} style={styles.mainActionBtn} onPress={() => { setMyPlanViewDate(getCurrentDateString()); setMyDayPlan(null); openAnimatedModal(setIsMyWorkoutVisible); }}>
+                <Ionicons name="fitness" size={24} color="#fff" style={{marginRight: 10}} />
                 <Text style={styles.mainActionText}>Моя тренировка</Text>
-              </TouchableOpacity>
+              </GradientButton>
             </View>
           )}
         </ScrollView>
@@ -84,11 +85,11 @@ export default function ClubScreen() {
                   </TouchableOpacity>
                 </View>
                 <View style={{flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6}}>
-                  <TouchableOpacity onPress={() => shiftMyPlanDate(-1)} style={{padding: 8}}><Ionicons name="chevron-back" size={26} color={COLORS.tabBar} /></TouchableOpacity>
+                  <TouchableOpacity onPress={() => shiftMyPlanDate(-1)} style={{padding: 8}}><Ionicons name="chevron-back" size={26} color={COLORS.rose} /></TouchableOpacity>
                   <Text style={{color: COLORS.textPrimary, fontSize: 17, fontWeight: '800'}}>
                     {myPlanViewDate === getCurrentDateString() ? 'Сегодня' : new Date(myPlanViewDate + 'T12:00:00').toLocaleDateString('ru-RU', {weekday: 'short', day: 'numeric', month: 'short'})}
                   </Text>
-                  <TouchableOpacity onPress={() => shiftMyPlanDate(1)} style={{padding: 8}}><Ionicons name="chevron-forward" size={26} color={COLORS.tabBar} /></TouchableOpacity>
+                  <TouchableOpacity onPress={() => shiftMyPlanDate(1)} style={{padding: 8}}><Ionicons name="chevron-forward" size={26} color={COLORS.rose} /></TouchableOpacity>
                 </View>
                 <ScrollView style={{width: '100%', marginTop: 6}} showsVerticalScrollIndicator={false}>
                   {(() => {
@@ -97,7 +98,7 @@ export default function ClubScreen() {
                     if (!planToShow || !Array.isArray(planToShow.workout_data) || !planToShow.workout_data.length) {
                       return (
                         <View style={{alignItems: 'center', marginTop: 50}}>
-                          <Ionicons name="cafe-outline" size={90} color={COLORS.tabBar} style={{opacity: 0.8}} />
+                          <Ionicons name="cafe-outline" size={90} color={COLORS.rose} style={{opacity: 0.8}} />
                           <Text style={styles.emptyText}>{isViewingToday ? 'Тренер еще не назначил план. Отдыхаем!' : 'На этот день плана нет'}</Text>
                         </View>
                       );
@@ -141,24 +142,24 @@ export default function ClubScreen() {
       <View style={styles.header}>
         <View style={{ flex: 1, marginRight: 15 }}><Text style={styles.pageTitle} numberOfLines={1}>Клубы</Text></View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {userRole === 'trainer' && (<TouchableOpacity onPress={() => openAnimatedModal(setIsCreatingGroup)} style={{ marginRight: 15 }}><Ionicons name="add-circle" size={40} color={COLORS.tabBar} /></TouchableOpacity>)}
+          {userRole === 'trainer' && (<TouchableOpacity onPress={() => openAnimatedModal(setIsCreatingGroup)} style={{ marginRight: 15 }}><Ionicons name="add-circle" size={40} color={COLORS.rose} /></TouchableOpacity>)}
           <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
         </View>
       </View>
       {groups.length === 0 ? (
         <View style={styles.emptyGroupsContainer}>
-          <Ionicons name="people-circle-outline" size={120} color={COLORS.tabBar} style={{opacity: 0.8, marginBottom: 10}} />
+          <Ionicons name="people-circle" size={120} color={COLORS.rose} style={{opacity: 0.85, marginBottom: 10}} />
           <Text style={styles.emptyText}>Вы еще не состоите в клубах</Text>
           <View style={styles.actionButtonsRow}>
-            {userRole === 'trainer' && (<TouchableOpacity style={styles.centerActionBtn} onPress={() => openAnimatedModal(setIsCreatingGroup)}><Text style={styles.buttonText}>Создать клуб</Text></TouchableOpacity>)}
+            {userRole === 'trainer' && (<GradientButton colors={GRADIENTS.rose} style={styles.centerActionBtn} onPress={() => openAnimatedModal(setIsCreatingGroup)}><Text style={styles.buttonText}>Создать клуб</Text></GradientButton>)}
             <TouchableOpacity style={[styles.centerActionBtn, {backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', marginTop: 15}]} onPress={() => openAnimatedModal(setIsJoiningGroup)}><Text style={[styles.buttonText, {color: COLORS.textPrimary}]}>Вступить по коду</Text></TouchableOpacity>
           </View>
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.groupsGrid} showsVerticalScrollIndicator={false}>
           {groups.map((group: Group) => (
-            <TouchableOpacity key={group.id} style={styles.groupSquare} onPress={() => { smoothStateUpdate(() => setActiveGroup(group)); }}>
-              <Ionicons name="people" size={46} color={COLORS.tabBar} />
+            <TouchableOpacity key={group.id} style={[styles.groupSquare, { borderColor: 'rgba(251,113,133,0.25)' }]} onPress={() => { smoothStateUpdate(() => setActiveGroup(group)); }}>
+              <Ionicons name="people" size={46} color={COLORS.rose} />
               <Text style={styles.groupSquareText} numberOfLines={1}>{group.name}</Text>
             </TouchableOpacity>
           ))}
@@ -175,7 +176,7 @@ export default function ClubScreen() {
             <Animated.View style={[styles.modalContent, { transform: [{ scale: modalScaleAnim }] }]}>
               <Text style={styles.modalTitle}>Название клуба</Text>
               <TextInput style={styles.input} value={newGroupName} onChangeText={setNewGroupName} placeholder="Напр: Power Gym" placeholderTextColor={COLORS.textSecondary}/>
-              <TouchableOpacity style={styles.button} onPress={createGroup}><Text style={styles.buttonText}>Создать</Text></TouchableOpacity>
+              <GradientButton colors={GRADIENTS.rose} style={styles.button} onPress={createGroup}><Text style={styles.buttonText}>Создать</Text></GradientButton>
               <TouchableOpacity style={{marginTop: 20}} onPress={() => closeAnimatedModal(setIsCreatingGroup)}><Text style={styles.backButtonText}>Отмена</Text></TouchableOpacity>
             </Animated.View>
           </Animated.View>
@@ -188,7 +189,7 @@ export default function ClubScreen() {
             <Animated.View style={[styles.modalContent, { transform: [{ scale: modalScaleAnim }] }]}>
               <Text style={styles.modalTitle}>Код доступа</Text>
               <TextInput style={styles.input} value={joinCode} onChangeText={setJoinCode} keyboardType="numeric" maxLength={6} placeholder="6 цифр" placeholderTextColor={COLORS.textSecondary}/>
-              <TouchableOpacity style={[styles.button, {backgroundColor: COLORS.tabBar}]} onPress={joinGroup}><Text style={styles.buttonText}>Подключиться</Text></TouchableOpacity>
+              <GradientButton colors={GRADIENTS.violetIndigo} style={styles.button} onPress={joinGroup}><Text style={styles.buttonText}>Подключиться</Text></GradientButton>
               <TouchableOpacity style={{marginTop: 20}} onPress={() => closeAnimatedModal(setIsJoiningGroup)}><Text style={styles.backButtonText}>Отмена</Text></TouchableOpacity>
             </Animated.View>
           </Animated.View>

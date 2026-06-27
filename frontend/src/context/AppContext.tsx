@@ -3,7 +3,8 @@ import { Platform, Alert, Animated, Easing, LayoutAnimation, ScrollView } from '
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { getCurrentDateString } from '../utils/date';
-import { parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl } from '../api/backend';
+import { parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl, notifyUser } from '../api/backend';
+import { configureNotificationHandler, registerForPushNotificationsAsync, scheduleLocalReminder, cancelAllScheduled, Notifications } from '../lib/notifications';
 import type {
   Session, WorkoutData, SavedAccount, Group, GroupMember, WeightLog,
   WorkoutRecord, AssignedWorkout, TrainingSession, ChatMessage, ChatSession, Macros, MealPreview,
@@ -256,9 +257,27 @@ function useAppController() {
     if (session) saveChatSessions();
   }, [chatSessions, session]);
 
+  // Пуш: настраиваем поведение в foreground + реагируем на тап по уведомлению (переход на вкладку).
+  useEffect(() => {
+    configureNotificationHandler();
+    const sub = Notifications.addNotificationResponseReceivedListener(resp => {
+      const data = (resp?.notification?.request?.content?.data || {}) as any;
+      if (data?.tab) setCurrentTab(data.tab);
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Клиенту планируем локальные напоминания о ближайших тренировках.
+  useEffect(() => {
+    const role = session?.user?.user_metadata?.role || userRole;
+    if (!session || role === 'trainer') return;
+    syncSessionReminders(upcomingSessions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [upcomingSessions]);
+
   useEffect(() => {
     if (session) {
-      loadHistory(); fetchGroups(); fetchUpcomingSessions(); fetchUserProfileData(); fetchWeightLog(); loadTodayNutritionData(); loadClientNutrition(); loadTodayWater();
+      loadHistory(); fetchGroups(); fetchUpcomingSessions(); fetchUserProfileData(); fetchWeightLog(); loadTodayNutritionData(); loadClientNutrition(); loadTodayWater(); registerPushToken();
       const loadPending = async () => {
         try {
           if (Platform.OS !== 'web') {
@@ -665,6 +684,33 @@ function useAppController() {
     } catch (err) {}
   };
 
+  // --- Пуш-уведомления ---
+  // Получаем Expo push-токен и сохраняем в Supabase (одна строка на устройство).
+  const registerPushToken = async () => {
+    if (!session?.user?.id) return;
+    const token = await registerForPushNotificationsAsync();
+    if (!token) return;
+    try {
+      await supabase.from('push_tokens').upsert(
+        { token, user_id: session.user.id, platform: Platform.OS, updated_at: new Date().toISOString() },
+        { onConflict: 'token' }
+      );
+    } catch {}
+  };
+
+  // Локальные напоминания клиенту о его ближайших тренировках (за час и в момент начала).
+  const syncSessionReminders = async (sessions: TrainingSession[]) => {
+    await cancelAllScheduled();
+    for (const s of sessions) {
+      const start = new Date(`${s.session_date}T${s.session_time || '00:00'}`);
+      if (isNaN(start.getTime())) continue;
+      const hourBefore = new Date(start.getTime() - 60 * 60 * 1000);
+      const where = s.group_name ? ` (${s.group_name})` : '';
+      await scheduleLocalReminder(`sess_${s.id}_1h`, 'Скоро тренировка ⏰', `Через час в ${s.session_time}${where}`, hourBefore, { tab: 'home' });
+      await scheduleLocalReminder(`sess_${s.id}_now`, 'Время тренировки 💪', `Тренировка начинается${where}`, start, { tab: 'home' });
+    }
+  };
+
   const fetchGroupDetails = async () => {
     try {
       const { data: members } = await supabase.from('group_members').select('*').eq('group_id', activeGroup?.id);
@@ -714,7 +760,11 @@ function useAppController() {
   const saveTrainingSession = async () => {
     if (!schedDate || !schedTime || !schedSelectedMember) return;
     const { error } = await supabase.from('training_sessions').insert([{ group_id: schedSelectedGroup?.id, client_id: schedSelectedMember.id, trainer_id: session?.user?.id, session_date: schedDate, session_time: schedTime }]);
-    if (error) Alert.alert("Ошибка", error.message); else { closeAnimatedModal(setIsSchedulingVisible); fetchUpcomingSessions(); setSchedSelectedGroup(null); setSchedSelectedMember(null); }
+    if (error) Alert.alert("Ошибка", error.message);
+    else {
+      notifyUser(schedSelectedMember.id, 'Новая запись на тренировку 📅', `${schedDate} в ${schedTime}${schedSelectedGroup?.name ? ` · ${schedSelectedGroup.name}` : ''}`, { tab: 'home' });
+      closeAnimatedModal(setIsSchedulingVisible); fetchUpcomingSessions(); setSchedSelectedGroup(null); setSchedSelectedMember(null);
+    }
   };
   const deleteSession = async (id: string) => { const { error } = await supabase.from('training_sessions').delete().eq('id', id); if (!error) fetchUpcomingSessions(); };
 
@@ -769,6 +819,7 @@ function useAppController() {
       if (existingPlan) { finalWorkoutData = [...(existingPlan.workout_data || []), ...newExercises]; } else { finalWorkoutData = newExercises; }
       const { error } = await supabase.from('assigned_workouts').upsert({ group_id: activeGroup?.id, client_id: selectedMember?.id, trainer_id: session?.user?.id, date: targetDate, workout_data: finalWorkoutData }, { onConflict: 'client_id, date' });
       if (error) throw error;
+      if (selectedMember?.id) notifyUser(selectedMember.id, 'Новый план тренировки 🏋️', `Тренер обновил тренировку на ${targetDate === getCurrentDateString() ? 'сегодня' : targetDate}`, { tab: 'club' });
       setAssignNote(''); fetchGroupDetails(); loadMemberDayPlan(); Alert.alert('Успех', 'План дополнен!');
     } catch (e: any) { Alert.alert('Ошибка', e.message); } finally { setIsLoading(false); }
   };
@@ -923,6 +974,27 @@ function useAppController() {
       Alert.alert('Успех', 'Тренировка записана!');
       return true;
     } catch (e: any) { Alert.alert('Ошибка связи', e.message); return false; } finally { setIsLoading(false); }
+  };
+
+  // Запись тренировки, собранной из списка упражнений (без ИИ — данные уже структурированы).
+  const addStructuredWorkout = async (items: { exercise: string; weight: number; reps: number }[]): Promise<boolean> => {
+    if (!items || items.length === 0) return false;
+    setIsLoading(true);
+    try {
+      const parsed: WorkoutData[] = items.map((it, i) => ({ exercise: it.exercise, weight: Number(it.weight) || 0, reps: Number(it.reps) || 0, id: `manual_${Date.now()}_${i}` }));
+      const rawText = parsed.map(p => `${p.exercise} ${p.weight}кг x ${p.reps}`).join('\n');
+      const { data: latestWorkouts } = await supabase.from('workouts').select('*').eq('user_id', session?.user?.id).order('created_at', { ascending: false }).limit(1);
+      if (latestWorkouts && latestWorkouts.length > 0 && new Date(latestWorkouts[0].created_at).toDateString() === new Date().toDateString()) {
+        const last = latestWorkouts[0];
+        await supabase.from('workouts').update({ raw_text: `${last.raw_text}\n${rawText}`, parsed_data: [...(last.parsed_data || []), ...parsed] }).eq('id', last.id);
+      } else {
+        await supabase.from('workouts').insert([{ raw_text: rawText, parsed_data: parsed, user_id: session?.user?.id }]);
+      }
+      loadHistory();
+      await registerActivityForWeightLoss(parsed, true);
+      Alert.alert('Успех', 'Тренировка записана!');
+      return true;
+    } catch (e: any) { Alert.alert('Ошибка', e.message); return false; } finally { setIsLoading(false); }
   };
 
   // Клиент пишет «на завтрак..., на обед..., на ужин...» — делим на приёмы, каждый на продукты с КБЖУ.
@@ -1286,7 +1358,7 @@ function useAppController() {
     assignedMealsToday, selfMealsToday, toggleAssignedMealEaten, loadClientNutrition,
 
     // workout journal
-    history, sendToAI,
+    history, sendToAI, addStructuredWorkout,
 
     // groups / clubs
     groups, activeGroup, setActiveGroup, groupMembers, setGroupMembers, todayWorkouts, setTodayWorkouts,

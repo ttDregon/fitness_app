@@ -1,9 +1,31 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { GradientButton } from '../components/Gradient';
 import { styles } from '../styles';
-import { COLORS } from '../theme';
+import { COLORS, GRADIENTS } from '../theme';
 import { useApp } from '../context/AppContext';
+
+// Плавное «печатающееся» появление текста ответа ИИ.
+// Анимируется только при animate=true (новые сообщения); история выводится сразу.
+function TypewriterText({ text, animate, onDone, style }: { text: string; animate: boolean; onDone?: () => void; style?: any }) {
+  const [count, setCount] = useState(animate ? 0 : text.length);
+  useEffect(() => {
+    if (!animate) { setCount(text.length); return; }
+    setCount(0);
+    const step = Math.max(1, Math.ceil(text.length / 140)); // вся анимация ≤ ~2.3с
+    let i = 0;
+    const timer = setInterval(() => {
+      i += step;
+      if (i >= text.length) { i = text.length; clearInterval(timer); onDone?.(); }
+      setCount(i);
+    }, 16);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, animate]);
+  const done = count >= text.length;
+  return <Text style={style}>{text.slice(0, count)}{done ? '' : '▌'}</Text>;
+}
 
 export default function ChatScreen() {
   const {
@@ -15,16 +37,25 @@ export default function ChatScreen() {
   // Локальный стейт ввода — чтобы набор текста не перерисовывал весь общий контекст.
   const [chatInput, setChatInput] = useState('');
 
+  // Какие сообщения уже показаны (без повторной анимации). При открытии чата
+  // помечаем всю текущую историю как «показанную» — анимируются только новые ответы ИИ.
+  const seenRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const chat = chatSessions.find(c => c.id === activeChatId);
+    seenRef.current = new Set((chat?.messages || []).map(m => m.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChatId]);
+
   const renderChatSidebar = () => {
     if (!isChatSidebarVisible) return null;
     return (
       <Modal visible={true} transparent animationType="fade" onRequestClose={() => setIsChatSidebarVisible(false)}>
         <View style={styles.chatSidebarOverlay}>
            <View style={styles.chatSidebarContent}>
-              <TouchableOpacity style={styles.newChatBtnSidebar} onPress={createNewChat}>
+              <GradientButton colors={GRADIENTS.indigo} style={styles.newChatBtnSidebar} onPress={createNewChat}>
                  <Ionicons name="add" size={24} color="#fff" />
                  <Text style={styles.newChatBtnTextSidebar}>Новый чат</Text>
-              </TouchableOpacity>
+              </GradientButton>
 
               <Text style={styles.sidebarSectionTitle}>Чаты</Text>
               <ScrollView showsVerticalScrollIndicator={false}>
@@ -70,7 +101,7 @@ export default function ChatScreen() {
 
       {!activeChatId && currentMessages.length === 0 ? (
         <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20}}>
-           <Ionicons name="chatbubbles-outline" size={80} color={COLORS.tabBar} style={{opacity: 0.6, marginBottom: 20}} />
+           <Ionicons name="chatbubbles" size={80} color={COLORS.indigo} style={{opacity: 0.7, marginBottom: 20}} />
            <Text style={{fontSize: 28, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 12, textAlign: 'center'}}>
               Привет, {displayName}!
            </Text>
@@ -86,12 +117,21 @@ export default function ChatScreen() {
                 <TextInput style={styles.editMessageInput} value={editInput} onChangeText={setEditInput} multiline />
                 <View style={styles.editMessageActions}>
                   <TouchableOpacity onPress={() => smoothStateUpdate(() => setEditingMessageId(null))} style={{padding: 8}}><Text style={{color: COLORS.error, marginRight: 20, fontSize: 16, fontWeight: '600'}}>Отмена</Text></TouchableOpacity>
-                  <TouchableOpacity onPress={saveEditMessage} style={{padding: 8}}><Text style={{color: COLORS.tabBar, fontWeight: 'bold', fontSize: 16}}>Сохранить</Text></TouchableOpacity>
+                  <TouchableOpacity onPress={saveEditMessage} style={{padding: 8}}><Text style={{color: COLORS.indigo, fontWeight: 'bold', fontSize: 16}}>Сохранить</Text></TouchableOpacity>
                 </View>
               </View>
             ) : (
               <View key={msg.id} style={[styles.chatBubble, msg.sender === 'user' ? styles.chatBubbleUser : styles.chatBubbleAI]}>
-                <Text style={[styles.chatText, msg.sender === 'user' ? styles.chatTextUser : styles.chatTextAI]}>{msg.text}</Text>
+                {msg.sender === 'ai' ? (
+                  <TypewriterText
+                    text={msg.text}
+                    animate={!seenRef.current.has(msg.id)}
+                    onDone={() => seenRef.current.add(msg.id)}
+                    style={[styles.chatText, styles.chatTextAI]}
+                  />
+                ) : (
+                  <Text style={[styles.chatText, styles.chatTextUser]}>{msg.text}</Text>
+                )}
                 {msg.sender === 'user' && (
                   <TouchableOpacity onPress={() => startEditMessage(msg)} style={styles.editIconBtn}>
                     <Ionicons name="pencil" size={14} color="#fff" />
@@ -100,13 +140,13 @@ export default function ChatScreen() {
               </View>
             )
           ))}
-          {isChatLoading && ( <View style={[styles.chatBubble, styles.chatBubbleAI, { width: 70, alignItems: 'center' }]}><ActivityIndicator size="small" color={COLORS.tabBar} /></View> )}
+          {isChatLoading && ( <View style={[styles.chatBubble, styles.chatBubbleAI, { width: 70, alignItems: 'center' }]}><ActivityIndicator size="small" color={COLORS.indigo} /></View> )}
         </ScrollView>
       )}
 
       <View style={styles.chatInputRow}>
         <TextInput style={styles.chatInput} placeholder="Запитайте AI..." placeholderTextColor={COLORS.textSecondary} value={chatInput} onChangeText={setChatInput} multiline />
-        <TouchableOpacity style={styles.chatSendBtn} onPress={() => { handleSendChatMessage(chatInput); setChatInput(''); }} disabled={isChatLoading}><Ionicons name="send" size={22} color="#fff" /></TouchableOpacity>
+        <GradientButton colors={GRADIENTS.indigo} style={styles.chatSendBtn} onPress={() => { handleSendChatMessage(chatInput); setChatInput(''); }} disabled={isChatLoading}><Ionicons name="send" size={22} color="#fff" /></GradientButton>
       </View>
     </View>
   );

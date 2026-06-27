@@ -2,8 +2,9 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StatusBar, Modal, Animated, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TabErrorBoundary } from '../components/TabErrorBoundary';
+import { ScreenBackground, GradientView } from '../components/Gradient';
 import { styles } from '../styles';
-import { COLORS } from '../theme';
+import { COLORS, GRADIENTS } from '../theme';
 import { useApp } from '../context/AppContext';
 import HomeScreen from './HomeScreen';
 import WorkoutScreen from './WorkoutScreen';
@@ -38,7 +39,7 @@ export default function MainShell() {
   };
 
   return (
-    <View style={styles.containerApp}>
+    <ScreenBackground>
       <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} translucent={false} />
       <Animated.View style={[styles.contentArea, { opacity: contentFadeAnim }]}>
         <TabErrorBoundary key={`${currentTab}_${activeGroup?.id || 'none'}`} onReset={() => { setActiveGroup(null); setCurrentTab('home'); }}>
@@ -64,12 +65,22 @@ export default function MainShell() {
       )}
 
       <View style={[styles.tabBar, { paddingBottom: Platform.OS === 'ios' ? 35 : 20, paddingTop: 15 }]}>
-        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('chat')}><Ionicons name={currentTab === 'chat' ? "chatbubble" : "chatbubble-outline"} size={28} color={currentTab === 'chat' ? COLORS.tabBar : COLORS.textSecondary} /></TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('workout')}><Ionicons name={currentTab === 'workout' ? "barbell" : "barbell-outline"} size={32} color={currentTab === 'workout' ? COLORS.tabBar : COLORS.textSecondary} /></TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('home')}><View style={[styles.homeTabIcon, currentTab === 'home' && {backgroundColor: COLORS.tabBar}]}><Ionicons name={currentTab === 'home' ? "home" : "home-outline"} size={32} color={currentTab === 'home' ? '#fff' : COLORS.textSecondary} /></View></TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('club')}><Ionicons name={currentTab === 'club' ? "people" : "people-outline"} size={32} color={currentTab === 'club' ? COLORS.tabBar : COLORS.textSecondary} /></TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('stats')}><Ionicons name={currentTab === 'stats' ? "stats-chart" : "stats-chart-outline"} size={28} color={currentTab === 'stats' ? COLORS.tabBar : COLORS.textSecondary} /></TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('chat')}><Ionicons name={currentTab === 'chat' ? "chatbubble" : "chatbubble-outline"} size={28} color={currentTab === 'chat' ? COLORS.indigo : COLORS.textSecondary} /></TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('workout')}><Ionicons name={currentTab === 'workout' ? "barbell" : "barbell-outline"} size={32} color={currentTab === 'workout' ? COLORS.amber : COLORS.textSecondary} /></TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('home')}>
+          {currentTab === 'home' ? (
+            <GradientView colors={GRADIENTS.violetIndigo} style={styles.homeTabIcon}>
+              <Ionicons name="home" size={32} color="#fff" />
+            </GradientView>
+          ) : (
+            <View style={styles.homeTabIcon}>
+              <Ionicons name="home-outline" size={32} color={COLORS.textSecondary} />
+            </View>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('club')}><Ionicons name={currentTab === 'club' ? "people" : "people-outline"} size={32} color={currentTab === 'club' ? COLORS.rose : COLORS.textSecondary} /></TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('stats')}><Ionicons name={currentTab === 'stats' ? "stats-chart" : "stats-chart-outline"} size={28} color={currentTab === 'stats' ? COLORS.cyan : COLORS.textSecondary} /></TouchableOpacity>
       </View>
-    </View>
+    </ScreenBackground>
   );
 }

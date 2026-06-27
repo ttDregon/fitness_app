@@ -4,9 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { LineChart } from 'react-native-chart-kit';
 import { ScrollPicker } from '../components/ScrollPicker';
+import { GradientButton, GradientView } from '../components/Gradient';
 import { weightWholeData, decimalsData } from '../utils/pickers';
 import { styles } from '../styles';
-import { COLORS, screenWidth } from '../theme';
+import { COLORS, GRADIENTS, screenWidth } from '../theme';
 import { useApp } from '../context/AppContext';
 import type { WeightLog, Group, GroupMember, TrainingSession } from '../types';
 
@@ -228,32 +229,32 @@ export default function HomeScreen() {
         <Text style={[styles.mainActionText, {color: COLORS.textPrimary}]}>Календарь записей</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.mainActionBtn} onPress={() => menuNavigate('workout')}>
+      <GradientButton colors={GRADIENTS.primary} style={styles.mainActionBtn} onPress={() => menuNavigate('workout')}>
         <Ionicons name="add-circle" size={24} color="#fff" style={{marginRight: 10}} />
         <Text style={styles.mainActionText}>Свободная тренировка</Text>
-      </TouchableOpacity>
+      </GradientButton>
 
-      <TouchableOpacity style={styles.metricCardFull} onPress={() => menuNavigate('nutrition')}>
+      <TouchableOpacity style={[styles.metricCardFull, { alignItems: 'stretch' }]} onPress={() => menuNavigate('nutrition')}>
         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-          <Ionicons name="restaurant-outline" size={28} color={COLORS.tabBar} style={{ marginRight: 10 }} />
+          <Ionicons name="restaurant" size={26} color={COLORS.emerald} style={{ marginRight: 10 }} />
           <Text style={styles.metricTitle}>Питание за сегодня</Text>
         </View>
         <Text style={styles.metricValueFull}>{consumedCalories} / {dailyCalorieNorm > 0 ? dailyCalorieNorm : '---'} ккал</Text>
         <View style={[styles.progressBarBg, { width: '100%', height: 14, marginTop: 12, marginLeft: 0 }]}>
-          <View style={[styles.progressBarFill, { width: `${caloriesProgress}%`, backgroundColor: caloriesProgress >= 100 ? COLORS.error : COLORS.tabBar }]} />
+          <GradientView colors={caloriesProgress >= 100 ? GRADIENTS.orange : GRADIENTS.emerald} style={[styles.progressBarFill, { width: `${caloriesProgress}%`, height: 14 }]} />
         </View>
       </TouchableOpacity>
 
       <View style={styles.metricsRow}>
-        <TouchableOpacity style={styles.metricCard} onPress={() => openAnimatedModal(setIsWeightModalVisible)}>
-          <Ionicons name="scale-outline" size={32} color={COLORS.tabBar} style={{marginBottom: 8}} />
+        <TouchableOpacity style={[styles.metricCard, { borderColor: 'rgba(139,92,246,0.22)' }]} onPress={() => openAnimatedModal(setIsWeightModalVisible)}>
+          <Ionicons name="scale" size={30} color={COLORS.violet} style={{marginBottom: 8}} />
           <Text style={styles.metricTitle}>Вес</Text>
           <Text style={styles.metricValue}>{currentWeight > 0 ? `${currentWeight} кг` : '---'}</Text>
-          <Text style={{fontSize: 13, color: COLORS.tabBar, marginTop: 4, fontWeight: '600'}}>Изменить 📝</Text>
+          <Text style={{fontSize: 13, color: COLORS.accentHover, marginTop: 4, fontWeight: '600'}}>Изменить 📝</Text>
         </TouchableOpacity>
 
-        <View style={styles.metricCard}>
-          <Ionicons name="water-outline" size={32} color="#0EA5E9" style={{marginBottom: 8}} />
+        <View style={[styles.metricCard, { borderColor: 'rgba(34,211,238,0.22)' }]}>
+          <Ionicons name="water" size={30} color={COLORS.cyan} style={{marginBottom: 8}} />
           <Text style={styles.metricTitle}>Вода</Text>
           <Text style={styles.metricValue}>{waterIntake.toFixed(1)} л</Text>
           <TouchableOpacity style={styles.miniBtn} onPress={addWater} onLongPress={resetWater}><Text style={styles.miniBtnText}>+200 мл</Text></TouchableOpacity>
@@ -314,9 +315,9 @@ export default function HomeScreen() {
                     <Text style={styles.wmPickerDot}>.</Text>
                     <ScrollPicker items={decimalsData} selectedValue={manualWeightDec} onValueChange={(val: string | number) => setManualWeightDec(val as string)} width={90} textColor={COLORS.textPrimary} />
                   </View>
-                  <TouchableOpacity style={styles.wmSaveBtn} onPress={handleManualWeightUpdate} disabled={isLoading}>
+                  <GradientButton colors={GRADIENTS.primary} style={styles.wmSaveBtn} onPress={handleManualWeightUpdate} disabled={isLoading}>
                     {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.wmSaveBtnText}>Сохранить</Text>}
-                  </TouchableOpacity>
+                  </GradientButton>
                 </View>
 
                 {renderChartSection()}
@@ -366,7 +367,7 @@ export default function HomeScreen() {
                   <Ionicons name="close-circle" size={36} color={COLORS.textSecondary} />
                 </TouchableOpacity>
               </View>
-              {userRole === 'trainer' && (<TouchableOpacity style={[styles.button, { marginBottom: 20 }]} onPress={startScheduling}><Text style={styles.buttonText}>+ Запланировать</Text></TouchableOpacity>)}
+              {userRole === 'trainer' && (<GradientButton colors={GRADIENTS.primary} style={[styles.button, { marginBottom: 20 }]} onPress={startScheduling}><Text style={styles.buttonText}>+ Запланировать</Text></GradientButton>)}
               <ScrollView style={{width: '100%', marginTop: 5, paddingBottom: 50}} showsVerticalScrollIndicator={false}>{renderCalendarList()}</ScrollView>
             </Animated.View>
           </Animated.View>
@@ -380,7 +381,7 @@ export default function HomeScreen() {
               <Text style={styles.modalTitle}>Новая запись</Text>
               {scheduleStep === 'group' && ( <View style={{width: '100%'}}><Text style={styles.label}>1. Выберите клуб:</Text>{groups.map((g: Group) => (<TouchableOpacity key={g.id} style={styles.selectItem} onPress={() => selectGroupForSchedule(g)}><Text style={styles.selectItemText}>{g.name}</Text></TouchableOpacity>))}</View> )}
               {scheduleStep === 'member' && ( <View style={{width: '100%'}}><Text style={styles.label}>2. Кто тренируется?</Text>{groupMembers.map((m: GroupMember) => (<TouchableOpacity key={m.id} style={[styles.selectItem, schedSelectedMember?.id === m.id && {borderColor: COLORS.tabBar, borderWidth: 2}]} onPress={() => { smoothStateUpdate(() => { setSchedSelectedMember(m); setScheduleStep('final'); }); }}><Text style={styles.selectItemText}>{m.name || m.email}</Text></TouchableOpacity>))}</View> )}
-              {scheduleStep === 'final' && ( <View style={{width: '100%'}}><Text style={styles.label}>3. Укажите дату и время:</Text><TouchableOpacity style={styles.pickerButton} onPress={() => setDatePickerVisible(true)}><Text style={styles.pickerButtonText}>{schedDate ? schedDate : 'Выбрать дату'}</Text></TouchableOpacity><TouchableOpacity style={styles.pickerButton} onPress={() => setTimePickerVisible(true)}><Text style={styles.pickerButtonText}>{schedTime ? schedTime : 'Выбрать время'}</Text></TouchableOpacity>{datePickerVisible && ( <DateTimePicker value={tempDate} mode="date" display="default" onChange={onDateChange} /> )}{timePickerVisible && ( <DateTimePicker value={tempDate} mode="time" is24Hour={true} display="default" onChange={onTimeChange} /> )}<TouchableOpacity style={[styles.button, {marginTop: 15}]} onPress={saveTrainingSession}><Text style={styles.buttonText}>Сохранить</Text></TouchableOpacity></View> )}
+              {scheduleStep === 'final' && ( <View style={{width: '100%'}}><Text style={styles.label}>3. Укажите дату и время:</Text><TouchableOpacity style={styles.pickerButton} onPress={() => setDatePickerVisible(true)}><Text style={styles.pickerButtonText}>{schedDate ? schedDate : 'Выбрать дату'}</Text></TouchableOpacity><TouchableOpacity style={styles.pickerButton} onPress={() => setTimePickerVisible(true)}><Text style={styles.pickerButtonText}>{schedTime ? schedTime : 'Выбрать время'}</Text></TouchableOpacity>{datePickerVisible && ( <DateTimePicker value={tempDate} mode="date" display="default" onChange={onDateChange} /> )}{timePickerVisible && ( <DateTimePicker value={tempDate} mode="time" is24Hour={true} display="default" onChange={onTimeChange} /> )}<GradientButton colors={GRADIENTS.primary} style={[styles.button, {marginTop: 15}]} onPress={saveTrainingSession}><Text style={styles.buttonText}>Сохранить</Text></GradientButton></View> )}
               <TouchableOpacity style={styles.backButton} onPress={() => { smoothStateUpdate(() => { setIsSchedulingVisible(false); setScheduleStep('group'); }); }}><Text style={styles.backButtonText}>Отмена</Text></TouchableOpacity>
             </Animated.View>
           </Animated.View>

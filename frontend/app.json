@@ -26,11 +26,20 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.ttdregon.mysafeapp"
+      "package": "com.ttdregon.mysafeapp",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#8B5CF6"
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "a5d7d03d-fbba-4684-bf95-86a9c4faba7b"
@@ -39,7 +48,7 @@
     "updates": {
       "url": "https://u.expo.dev/a5d7d03d-fbba-4684-bf95-86a9c4faba7b"
     },
-    "runtimeVersion": "1.0.0",
+    "runtimeVersion": "1.1.0",
     "owner": "ttdregon"
   }
 }

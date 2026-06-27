@@ -1,9 +1,9 @@
 import React from 'react';
-import { Platform, UIManager, LogBox, View, ActivityIndicator } from 'react-native';
+import { Platform, UIManager, LogBox, ActivityIndicator } from 'react-native';
 import { AppProvider, useApp } from './src/context/AppContext';
 import AuthScreen from './src/screens/AuthScreen';
 import MainShell from './src/screens/MainShell';
-import { styles } from './src/styles';
+import { ScreenBackground } from './src/components/Gradient';
 import { COLORS } from './src/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -20,13 +20,13 @@ function Root() {
 
   if (isSwitchingAccount) {
     return (
-      <View style={[styles.containerApp, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color={COLORS.tabBar} />
-      </View>
+      <ScreenBackground style={{ justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={COLORS.accentHover} />
+      </ScreenBackground>
     );
   }
 
-  if (!session) return <AuthScreen />;
+  if (!session) return <ScreenBackground><AuthScreen /></ScreenBackground>;
 
   return <MainShell />;
 }

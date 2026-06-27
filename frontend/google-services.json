@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "923993135816",
+    "project_id": "fitness-app-cacb9",
+    "storage_bucket": "fitness-app-cacb9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:923993135816:android:37d96afc599c2c345d63fd",
+        "android_client_info": {
+          "package_name": "com.ttdregon.mysafeapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBKLvMH1zwpTxX4MuFMQxsdsrBdzbdG8YA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

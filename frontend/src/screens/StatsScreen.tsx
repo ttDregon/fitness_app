@@ -16,7 +16,7 @@ export default function StatsScreen() {
         <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
       </View>
       <View style={styles.centerView}>
-        <Ionicons name="stats-chart" size={100} color={COLORS.tabBar} style={{opacity: 0.8}} />
+        <Ionicons name="stats-chart" size={100} color={COLORS.cyan} style={{opacity: 0.85}} />
         <Text style={styles.placeholderText}>Раздел находится в разработке</Text>
       </View>
     </View>

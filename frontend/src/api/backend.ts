@@ -11,12 +11,12 @@ export const getBackendUrl = (): string => {
   return `http://${MY_PC_IP}:8000`;
 };
 
-// Парсинг текста тренировки -> { parsed_data: [...] }
-export async function parseWorkout(text: string): Promise<any> {
+// Парсинг текста тренировки -> { parsed_data: [...] } | { status: 'limit_reached' }
+export async function parseWorkout(text: string, userId?: string): Promise<any> {
   const response = await fetch(`${getBackendUrl()}/parse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, user_id: userId }),
   });
   if (!response.ok) throw new Error('Бэкенд сервер не отвечает');
   return response.json();
@@ -34,11 +34,11 @@ export async function parseMeal(text: string): Promise<any> {
 }
 
 // Разбор питания на приёмы и продукты -> { meals: [{ meal_type, items: [{name,calories,protein,fat,carbs}] }] }
-export async function parseMeals(text: string): Promise<any> {
+export async function parseMeals(text: string, userId?: string): Promise<any> {
   const response = await fetch(`${getBackendUrl()}/parse_meals`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, user_id: userId }),
   });
   if (!response.ok) throw new Error(`Ошибка сервера: статус ${response.status}`);
   return response.json();

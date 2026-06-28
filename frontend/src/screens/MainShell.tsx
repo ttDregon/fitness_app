@@ -3,6 +3,7 @@ import { View, Text, ScrollView, TouchableOpacity, StatusBar, Modal, Animated, P
 import { Ionicons } from '@expo/vector-icons';
 import { TabErrorBoundary } from '../components/TabErrorBoundary';
 import { ScreenBackground, GradientView } from '../components/Gradient';
+import { Paywall } from '../components/Paywall';
 import { styles } from '../styles';
 import { COLORS, GRADIENTS } from '../theme';
 import { useApp } from '../context/AppContext';
@@ -81,6 +82,8 @@ export default function MainShell() {
         <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('club')}><Ionicons name={currentTab === 'club' ? "people" : "people-outline"} size={32} color={currentTab === 'club' ? COLORS.rose : COLORS.textSecondary} /></TouchableOpacity>
         <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('stats')}><Ionicons name={currentTab === 'stats' ? "stats-chart" : "stats-chart-outline"} size={28} color={currentTab === 'stats' ? COLORS.cyan : COLORS.textSecondary} /></TouchableOpacity>
       </View>
+
+      <Paywall />
     </ScreenBackground>
   );
 }

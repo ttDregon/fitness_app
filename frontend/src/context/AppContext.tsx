@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
-import { Platform, Alert, Animated, Easing, LayoutAnimation, ScrollView } from 'react-native';
+import { Platform, Alert, Animated, Easing, LayoutAnimation, ScrollView, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { getCurrentDateString } from '../utils/date';
+import { tgCheckoutUrl } from '../config/billing';
 import { parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl, notifyUser } from '../api/backend';
 import { configureNotificationHandler, registerForPushNotificationsAsync, scheduleLocalReminder, cancelAllScheduled, Notifications } from '../lib/notifications';
 import type {
@@ -56,6 +57,12 @@ function useAppController() {
 
   const [dailyCalorieNorm, setDailyCalorieNorm] = useState<number>(0);
   const [maintenanceCalories, setMaintenanceCalories] = useState<number>(0); // поддержка (TDEE без коррекции на цель)
+
+  // --- Подписки ---
+  const [trainerUntil, setTrainerUntil] = useState<string | null>(null); // доступ к роли тренера до этой даты
+  const [aiPlan, setAiPlan] = useState<string>('free');
+  const [aiUntil, setAiUntil] = useState<string | null>(null);
+  const [paywall, setPaywall] = useState<null | 'trainer' | 'ai'>(null);
   const [dailyMacros, setDailyMacros] = useState<Macros>({ protein: 0, fat: 0, carb: 0 });
   const [consumedCalories, setConsumedCalories] = useState<number>(0);
   const [consumedMacros, setConsumedMacros] = useState<Macros>({ protein: 0, fat: 0, carb: 0 });
@@ -454,6 +461,9 @@ function useAppController() {
         setCurrentWeight(data.weight || 0);
         setUserGoal(data.goal || 'maintain');
         setTargetWeight(data.target_weight || null);
+        setTrainerUntil(data.trainer_until || null);
+        setAiPlan(data.ai_plan || 'free');
+        setAiUntil(data.ai_until || null);
         if (data.weight && data.height && data.age && data.gender) {
           let bmr = data.gender === 'male' ? (10 * data.weight) + (6.25 * data.height) - (5 * data.age) + 5 : (10 * data.weight) + (6.25 * data.height) - (5 * data.age) - 161;
           let mult = 1.2;
@@ -476,6 +486,23 @@ function useAppController() {
       });
     }
   };
+
+  // --- Подписки: производные флаги + действия ---
+  const trainerSubActive = !!trainerUntil && new Date(trainerUntil).getTime() > Date.now();
+  const aiUnlimited = aiPlan === 'unlim' && !!aiUntil && new Date(aiUntil).getTime() > Date.now();
+
+  // Гейт тренерских функций: true если можно, иначе показывает paywall и возвращает false.
+  const requireTrainerSub = (): boolean => {
+    if (trainerSubActive) return true;
+    setPaywall('trainer');
+    return false;
+  };
+  // Открыть оплату в Telegram-боте (он по start-параметру активирует подписку в Supabase).
+  const openCheckout = (kind: 'trainer' | 'ai', planId: string) => {
+    Linking.openURL(tgCheckoutUrl(kind, planId, session?.user?.id))
+      .catch(() => Alert.alert('Telegram', 'Не удалось открыть Telegram. Установлен ли он?'));
+  };
+  const refreshSubscription = async () => { await fetchUserProfileData(); };
 
   const getLocalWeightKey = () => `weight_logs_${session?.user?.id || 'guest'}`;
 
@@ -833,6 +860,7 @@ function useAppController() {
   };
 
   const saveTrainingSession = async () => {
+    if (!requireTrainerSub()) return;
     if (!schedDate || !schedTime || !schedSelectedMember) return;
     const { error } = await supabase.from('training_sessions').insert([{ group_id: schedSelectedGroup?.id, client_id: schedSelectedMember.id, trainer_id: session?.user?.id, session_date: schedDate, session_time: schedTime }]);
     if (error) Alert.alert("Ошибка", error.message);
@@ -889,10 +917,12 @@ function useAppController() {
   };
 
   const assignWorkoutToMember = async () => {
+    if (!requireTrainerSub()) return;
     if (!assignNote) return;
     setIsLoading(true);
     try {
-      const aiData = await parseWorkout(assignNote);
+      const aiData = await parseWorkout(assignNote, session?.user?.id);
+      if (aiData?.status === 'limit_reached') { Alert.alert('Лимит разбора', `Разбор тренировок: ${aiData.limit}/день. Лимит на сегодня исчерпан.`); return; }
       if (!aiData || !Array.isArray(aiData.parsed_data)) throw new Error('ИИ вернул данные в неверном формате');
       const newExercises: WorkoutData[] = aiData.parsed_data.map((item: any, index: number) => ({ ...item, id: `task_${Date.now()}_${index}`, completed: false }));
       const targetDate = assignWorkoutDate;
@@ -920,6 +950,7 @@ function useAppController() {
   };
 
   const createGroup = async () => {
+    if (!requireTrainerSub()) return;
     if (!newGroupName.trim()) return;
     const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
     const { data, error } = await supabase.from('groups').insert([{ name: newGroupName, code: randomCode, owner_id: session?.user?.id }]).select();
@@ -1024,7 +1055,8 @@ function useAppController() {
     if (!noteText) return false;
     setIsLoading(true);
     try {
-      const data = await parseWorkout(noteText);
+      const data = await parseWorkout(noteText, session?.user?.id);
+      if (data?.status === 'limit_reached') { Alert.alert('Лимит разбора', `Разбор тренировок: ${data.limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return false; }
       const newParsedData = data.parsed_data || [];
 
       const { data: latestWorkouts } = await supabase
@@ -1085,7 +1117,8 @@ function useAppController() {
     if (!text.trim()) return;
     setIsMealPreviewLoading(true);
     try {
-      const data = await parseMeals(text);
+      const data = await parseMeals(text, session?.user?.id);
+      if (data?.status === 'limit_reached') { Alert.alert('Лимит разбора', `Разбор еды: ${data.limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return; }
       if (!data || data.error || !Array.isArray(data.meals)) throw new Error(data?.error || 'ИИ вернул данные в неверном формате');
       const meals: MealItem[] = data.meals.map((meal: any, mi: number) => {
         const items: FoodItem[] = (meal.items || []).map((it: any) => ({ name: it.name || 'блюдо', calories: it.calories || 0, protein: it.protein || 0, fat: it.fat || 0, carbs: it.carbs || 0 }));
@@ -1151,6 +1184,12 @@ function useAppController() {
 
     try {
       const data = await sendChat(apiMessages, session?.user?.id);
+      if (data?.limit_reached) {
+        const lm: ChatMessage = { id: (Date.now() + 1).toString(), text: `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Оформи подписку, чтобы продолжить.`, sender: 'ai' };
+        smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, lm], updatedAt: Date.now() } : c)));
+        setPaywall('ai');
+        return;
+      }
 
       const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai' };
       smoothStateUpdate(() => {
@@ -1189,6 +1228,12 @@ function useAppController() {
 
     try {
       const data = await sendChat(apiMessages, session?.user?.id);
+      if (data?.limit_reached) {
+        const lm: ChatMessage = { id: (Date.now() + 1).toString(), text: `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Оформи подписку, чтобы продолжить.`, sender: 'ai' };
+        smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, lm], updatedAt: Date.now() } : c)));
+        setPaywall('ai');
+        return;
+      }
 
       const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai' };
       smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, aiMsg], updatedAt: Date.now() } : c)));
@@ -1417,6 +1462,8 @@ function useAppController() {
 
     // nutrition
     dailyCalorieNorm, maintenanceCalories, dailyMacros, consumedCalories, consumedMacros,
+    // подписки
+    paywall, setPaywall, trainerSubActive, aiUnlimited, requireTrainerSub, openCheckout, refreshSubscription,
     isMealModalVisible, setIsMealModalVisible,
     isMealPreviewLoading, mealParse, setMealParse,
     calcClientMeals, confirmClientMeals,

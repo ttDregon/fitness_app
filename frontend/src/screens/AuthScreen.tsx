@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, LayoutAnimation } from 'react-native';
 import { ScrollPicker } from '../components/ScrollPicker';
 import { GradientButton } from '../components/Gradient';
+import { TRAINER_PLANS } from '../config/billing';
 import { ageData, heightWholeData, weightWholeData, decimalsData } from '../utils/pickers';
 import { styles } from '../styles';
 import { COLORS, GRADIENTS } from '../theme';
@@ -41,8 +42,29 @@ export default function AuthScreen() {
         <Text style={styles.title}>Новый аккаунт</Text>
         <Text style={styles.subtitle}>Выберите свою роль</Text>
         <GradientButton colors={GRADIENTS.violetIndigo} style={styles.choiceButton} onPress={() => { smoothStateUpdate(() => { setUserRole('client'); setAuthMode('register_credentials'); }); }}><Text style={styles.buttonText}>Я Клиент</Text><Text style={styles.subText}>Тренируюсь по плану</Text></GradientButton>
-        <TouchableOpacity style={[styles.choiceButton, {backgroundColor: COLORS.cardAlt, borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.35)'}]} onPress={() => { smoothStateUpdate(() => { setUserRole('trainer'); setAuthMode('register_credentials'); }); }}><Text style={[styles.buttonText, {color: COLORS.textPrimary}]}>Я Тренер</Text><Text style={[styles.subText, {color: COLORS.textSecondary}]}>Веду клиентов</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.choiceButton, {backgroundColor: COLORS.cardAlt, borderWidth: 1, borderColor: 'rgba(251, 113, 133, 0.4)'}]} onPress={() => { smoothStateUpdate(() => { setUserRole('trainer'); setAuthMode('trainer_intro'); }); }}><Text style={[styles.buttonText, {color: COLORS.textPrimary}]}>Я Тренер</Text><Text style={[styles.subText, {color: COLORS.textSecondary}]}>Веду клиентов · по подписке</Text></TouchableOpacity>
         <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode('login')); }} style={styles.backButton}><Text style={styles.backButtonText}>← Вернуться ко входу</Text></TouchableOpacity>
+      </View>
+    );
+  }
+  if (authMode === 'trainer_intro') {
+    return (
+      <View style={styles.authContainer}>
+        <Text style={styles.title}>Подписка «Тренер»</Text>
+        <Text style={styles.subtitle}>Роль тренера — по подписке. Спортсмены пользуются бесплатно.</Text>
+        {TRAINER_PLANS.map(p => (
+          <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 18, padding: 18, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(251,113,133,0.3)' }}>
+            <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }}>{p.label}</Text>
+            <Text style={{ color: COLORS.rose, fontSize: 18, fontWeight: '900' }}>{p.priceUah} грн</Text>
+          </View>
+        ))}
+        <Text style={{ color: COLORS.textMuted, fontSize: 13, textAlign: 'center', marginVertical: 14, lineHeight: 19 }}>
+          Оплата — в Telegram после регистрации. Без подписки тренерские функции закрыты, но аккаунт и личные функции доступны.
+        </Text>
+        <GradientButton colors={GRADIENTS.rose} style={styles.button} onPress={() => { smoothStateUpdate(() => setAuthMode('register_credentials')); }}>
+          <Text style={styles.buttonText}>Продолжить регистрацию →</Text>
+        </GradientButton>
+        <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode('role_select')); }} style={styles.backButton}><Text style={styles.backButtonText}>← Назад к выбору роли</Text></TouchableOpacity>
       </View>
     );
   }

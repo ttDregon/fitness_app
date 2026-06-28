@@ -105,7 +105,8 @@ export default function ClientPlanModal() {
     if (!mealInput.trim()) return;
     setMealPreviewLoading(true);
     try {
-      const data = await parseMeals(mealInput);
+      const data = await parseMeals(mealInput, session?.user?.id);
+      if (data?.status === 'limit_reached') { Alert.alert('Лимит разбора', `Разбор еды: ${data.limit}/день. Лимит на сегодня исчерпан.`); return; }
       if (!data || data.error || !Array.isArray(data.meals)) throw new Error(data?.error || 'ИИ вернул данные в неверном формате');
       const items: FoodItem[] = data.meals.flatMap((meal: any) => (meal.items || []).map((it: any) => ({ name: it.name || 'блюдо', calories: it.calories || 0, protein: it.protein || 0, fat: it.fat || 0, carbs: it.carbs || 0 })));
       if (items.length === 0) throw new Error('Не удалось распознать продукты');

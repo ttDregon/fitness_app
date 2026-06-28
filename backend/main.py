@@ -2,6 +2,7 @@ import json
 import os
 import re
 import httpx
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
@@ -36,9 +37,63 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+# --- ЛИМИТЫ ИИ (считаются на сервере, нельзя обойти из приложения) ---
+AI_FREE_PARSE = 10          # разбор еды и тренировок: 10/день каждый, всегда
+CHAT_LIMITS = {"free": 10, "p50": 50, "p150": 150, "unlim": -1}  # -1 = безлимит
+
+def _today():
+    return datetime.now(timezone.utc).date().isoformat()
+
+def _parse_dt(s):
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+def _chat_limit(uid: str) -> int:
+    """Лимит ИИ-чата по активной подписке (иначе free=10)."""
+    try:
+        res = supabase.table("profiles").select("ai_plan, ai_until").eq("id", uid).maybe_single().execute()
+        row = res.data or {}
+        plan = row.get("ai_plan") or "free"
+        until = _parse_dt(row.get("ai_until"))
+        if not until or until <= datetime.now(timezone.utc):
+            plan = "free"
+        return CHAT_LIMITS.get(plan, 10)
+    except Exception:
+        return 10
+
+def _usage(uid: str, kind: str):
+    """Возвращает (использовано_сегодня, есть_ли_строка)."""
+    try:
+        res = supabase.table("ai_usage").select("*").eq("user_id", uid).eq("day", _today()).maybe_single().execute()
+        row = res.data
+        return (int(row.get(kind, 0)) if row else 0), bool(row)
+    except Exception:
+        return 0, False
+
+def _inc_usage(uid: str, kind: str, used: int, exists: bool):
+    try:
+        if exists:
+            supabase.table("ai_usage").update({kind: used + 1}).eq("user_id", uid).eq("day", _today()).execute()
+        else:
+            supabase.table("ai_usage").insert({"user_id": uid, "day": _today(), kind: 1}).execute()
+    except Exception:
+        pass
+
+def _check_ai(uid: str, kind: str, limit: int):
+    """True/инфо если можно; если лимит исчерпан — (False, used, exists)."""
+    if not uid or limit == -1:
+        return True, 0, False
+    used, exists = _usage(uid, kind)
+    if used >= limit:
+        return False, used, exists
+    return True, used, exists
+
 # Модели данных для запросов
 class WorkoutNote(BaseModel):
     text: str
+    user_id: Optional[str] = None
 
 class MealNote(BaseModel):
     text: str
@@ -79,7 +134,11 @@ async def health():
 @app.post("/parse")
 async def parse_workout(note: WorkoutNote):
     print(f"\n--- ЗАПРОС К DEEPSEEK (ПАРСИНГ ТРЕНИРОВКИ) ---")
-    
+
+    ok, used, exists = _check_ai(note.user_id, "workout", AI_FREE_PARSE)
+    if not ok:
+        return {"status": "limit_reached", "kind": "workout", "limit": AI_FREE_PARSE, "parsed_data": []}
+
     prompt = f"""
     Проанализируй текст тренировки и верни результат СТРОГО в формате JSON.
     Ответ должен быть JSON-объектом с одним ключом "workouts", в котором лежит массив объектов.
@@ -103,6 +162,8 @@ async def parse_workout(note: WorkoutNote):
         
         raw_response = response.choices[0].message.content
         parsed_json = json.loads(raw_response)
+        if note.user_id:
+            _inc_usage(note.user_id, "workout", used, exists)
         return {
             "status": "success",
             "parsed_data": parsed_json.get("workouts", [])
@@ -152,6 +213,11 @@ async def parse_meal(data: dict):
 @app.post("/parse_meals")
 async def parse_meals(data: dict):
     text = data.get("text", "")
+    uid = data.get("user_id")
+
+    ok, used, exists = _check_ai(uid, "meal", AI_FREE_PARSE)
+    if not ok:
+        return {"status": "limit_reached", "kind": "meal", "limit": AI_FREE_PARSE, "meals": []}
 
     prompt = f"""
     Проанализируй, что съел человек или что назначено в меню: "{text}".
@@ -189,6 +255,8 @@ async def parse_meals(data: dict):
         raw = response.choices[0].message.content
         cleaned = re.sub(r'```json|```', '', raw).strip()
         parsed = json.loads(cleaned)
+        if uid:
+            _inc_usage(uid, "meal", used, exists)
         return {"meals": parsed.get("meals", [])}
     except Exception as e:
         return {"error": str(e)}
@@ -246,7 +314,16 @@ async def notify(req: NotifyRequest):
 @app.post("/chat")
 async def chat_assistant(req: ChatRequest):
     print(f"\n--- ЗАПРОС К DEEPSEEK (ЧАТ С ПАМЯТЬЮ) ---")
-    
+
+    # Лимит ИИ-чата по подписке (free=10/день).
+    chat_used, chat_exists = 0, False
+    if req.user_id:
+        limit = _chat_limit(req.user_id)
+        ok, chat_used, chat_exists = _check_ai(req.user_id, "chat", limit)
+        if not ok:
+            return {"limit_reached": True, "kind": "chat", "limit": limit,
+                    "reply": "", "calories": 0, "protein": 0, "fat": 0, "carbs": 0}
+
     user_context = ""
     if req.user_id:
         try:
@@ -321,7 +398,10 @@ async def chat_assistant(req: ChatRequest):
         
         raw_reply = response.choices[0].message.content
         parsed_reply = json.loads(raw_reply)
-        
+
+        if req.user_id:
+            _inc_usage(req.user_id, "chat", chat_used, chat_exists)
+
         return {
             "reply": parsed_reply.get("reply", "Ошибка формата"),
             "calories": parsed_reply.get("calories", 0),

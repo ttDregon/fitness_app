@@ -17,7 +17,7 @@ export default function HomeScreen() {
     consumedCalories, dailyCalorieNorm, maintenanceCalories, currentWeight, setIsWeightModalVisible, waterIntake, addWater, resetWater,
     isWeightModalVisible, modalOpacityAnim, modalScaleAnim, closeAnimatedModal, userGoal, targetWeight,
     weightHistoryLogs, manualWeightWhole, setManualWeightWhole, manualWeightDec, setManualWeightDec,
-    handleManualWeightUpdate, isLoading, isScheduleListVisible, startScheduling, isSchedulingVisible,
+    handleManualWeightUpdate, isLoading, isScheduleListVisible, startScheduling, isSchedulingVisible, requireTrainerSub,
     scheduleStep, groups, selectGroupForSchedule, groupMembers, schedSelectedMember, setSchedSelectedMember,
     setScheduleStep, schedDate, schedTime, setDatePickerVisible, setTimePickerVisible, datePickerVisible,
     tempDate, onDateChange, timePickerVisible, onTimeChange, saveTrainingSession, setIsSchedulingVisible,
@@ -374,7 +374,7 @@ export default function HomeScreen() {
                   <Ionicons name="close-circle" size={36} color={COLORS.textSecondary} />
                 </TouchableOpacity>
               </View>
-              {userRole === 'trainer' && (<GradientButton colors={GRADIENTS.primary} style={[styles.button, { marginBottom: 20 }]} onPress={startScheduling}><Text style={styles.buttonText}>+ Запланировать</Text></GradientButton>)}
+              {userRole === 'trainer' && (<GradientButton colors={GRADIENTS.primary} style={[styles.button, { marginBottom: 20 }]} onPress={() => { if (!requireTrainerSub()) return; startScheduling(); }}><Text style={styles.buttonText}>+ Запланировать</Text></GradientButton>)}
               <ScrollView style={{width: '100%', marginTop: 5, paddingBottom: 50}} showsVerticalScrollIndicator={false}>{renderCalendarList()}</ScrollView>
             </Animated.View>
           </Animated.View>

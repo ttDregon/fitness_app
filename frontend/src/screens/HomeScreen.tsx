@@ -14,7 +14,7 @@ import type { WeightLog, Group, GroupMember, TrainingSession } from '../types';
 export default function HomeScreen() {
   const {
     displayName, userRole, openAnimatedModal, handleTabChange, setIsScheduleListVisible, menuNavigate,
-    consumedCalories, dailyCalorieNorm, currentWeight, setIsWeightModalVisible, waterIntake, addWater, resetWater,
+    consumedCalories, dailyCalorieNorm, maintenanceCalories, currentWeight, setIsWeightModalVisible, waterIntake, addWater, resetWater,
     isWeightModalVisible, modalOpacityAnim, modalScaleAnim, closeAnimatedModal, userGoal, targetWeight,
     weightHistoryLogs, manualWeightWhole, setManualWeightWhole, manualWeightDec, setManualWeightDec,
     handleManualWeightUpdate, isLoading, isScheduleListVisible, startScheduling, isSchedulingVisible,
@@ -293,6 +293,11 @@ export default function HomeScreen() {
                         Цель {targetWeight.toFixed(1)} кг · осталось {Math.abs(currentWeight - targetWeight).toFixed(1)} кг
                       </Text>
                     </View>
+                  )}
+                  {maintenanceCalories > 0 && (
+                    <Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 12, textAlign: 'center', lineHeight: 18 }}>
+                      Поддержка ≈ {maintenanceCalories} ккал/день{'\n'}вес авто-досчитывается по итогам дня (питание) и через час после тренировки
+                    </Text>
                   )}
                   {targetWeight && targetWeight > 0 && weightHistoryLogs.length > 0 && (() => {
                     const startW = weightHistoryLogs[weightHistoryLogs.length - 1]?.weight || currentWeight;

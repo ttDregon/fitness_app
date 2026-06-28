@@ -55,6 +55,7 @@ function useAppController() {
   useEffect(() => { currentWeightRef.current = currentWeight; }, [currentWeight]);
 
   const [dailyCalorieNorm, setDailyCalorieNorm] = useState<number>(0);
+  const [maintenanceCalories, setMaintenanceCalories] = useState<number>(0); // поддержка (TDEE без коррекции на цель)
   const [dailyMacros, setDailyMacros] = useState<Macros>({ protein: 0, fat: 0, carb: 0 });
   const [consumedCalories, setConsumedCalories] = useState<number>(0);
   const [consumedMacros, setConsumedMacros] = useState<Macros>({ protein: 0, fat: 0, carb: 0 });
@@ -313,6 +314,7 @@ function useAppController() {
       ]);
       loadPending();
       registerPushToken(); // не блокирует показ интерфейса
+      settleCalorieWeight(); // досчитать влияние вчерашнего питания на вес
       if (!cancelled) setBootReady(true);
     })();
     return () => { cancelled = true; };
@@ -459,6 +461,7 @@ function useAppController() {
           else if (data.workouts_per_week === '3-4') mult = 1.55;
           else if (data.workouts_per_week === '5+') mult = 1.725;
           let tdee = bmr * mult;
+          setMaintenanceCalories(Math.round(tdee)); // поддержка веса (до коррекции на цель)
           if (data.goal === 'lose') tdee -= 500;
           else if (data.goal === 'gain') tdee += 500;
 
@@ -600,6 +603,59 @@ function useAppController() {
         if (Platform.OS !== 'web') { await AsyncStorage.removeItem('pendingExercises'); await AsyncStorage.removeItem('lastActivityTime'); } else { if (typeof window !== 'undefined') { window.localStorage.removeItem('pendingExercises'); window.localStorage.removeItem('lastActivityTime'); } }
         setPendingExerciseCount(0); setLastActivityTime(null);
       }
+    } catch (e) {}
+  };
+
+  // Раз в день досчитываем влияние ПИТАНИЯ на вес: (съедено вчера − поддержка) / 7700 кг.
+  // Поддержка = TDEE без коррекции на цель. Двигаем вес только за дни, где еда реально записана.
+  // Активность (тренировки) учитывается отдельно — checkPendingWeight через час после тренировки.
+  const KCAL_PER_KG = 7700;
+  const settleCalorieWeight = async () => {
+    if (!session?.user?.id) return;
+    const uid = session.user.id;
+    const today = getCurrentDateString();
+    const settleKey = `weightSettle_${uid}`;
+    const readKV = async (k: string) => Platform.OS !== 'web' ? await AsyncStorage.getItem(k) : (typeof window !== 'undefined' ? window.localStorage.getItem(k) : null);
+    const writeKV = async (k: string, v: string) => { if (Platform.OS !== 'web') await AsyncStorage.setItem(k, v); else if (typeof window !== 'undefined') window.localStorage.setItem(k, v); };
+    try {
+      const lastSettled = await readKV(settleKey);
+      if (!lastSettled) { await writeKV(settleKey, today); return; } // первый запуск — без пересчёта задним числом
+      if (lastSettled >= today) return; // уже сегодня считали
+
+      // вчерашняя дата (по локальному времени)
+      const d = new Date(today + 'T12:00:00');
+      d.setDate(d.getDate() - 1);
+      const yKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+      // профиль → текущий вес + поддержка (TDEE)
+      const { data: prof } = await supabase.from('profiles').select('weight, height, age, gender, workouts_per_week').eq('id', uid).single();
+      if (!prof?.weight || !prof.height || !prof.age || !prof.gender) { await writeKV(settleKey, today); return; }
+      const bmr = prof.gender === 'male'
+        ? 10 * prof.weight + 6.25 * prof.height - 5 * prof.age + 5
+        : 10 * prof.weight + 6.25 * prof.height - 5 * prof.age - 161;
+      let mult = 1.2;
+      if (prof.workouts_per_week === '1-2') mult = 1.375;
+      else if (prof.workouts_per_week === '3-4') mult = 1.55;
+      else if (prof.workouts_per_week === '5+') mult = 1.725;
+      const maintenance = bmr * mult;
+
+      // съедено вчера (из локального хранилища питания)
+      let consumed = 0;
+      const nstr = await readKV(`nutrition_${uid}_${yKey}`);
+      if (nstr) { try { consumed = JSON.parse(nstr).calories || 0; } catch {} }
+
+      if (consumed > 0) {
+        let delta = (consumed - maintenance) / KCAL_PER_KG;
+        delta = Math.max(-0.4, Math.min(0.4, delta)); // защита от мусора (макс ±0.4 кг/день)
+        const newW = parseFloat((prof.weight + delta).toFixed(2));
+        if (newW > 0 && Math.abs(delta) >= 0.01) {
+          await supabase.from('profiles').update({ weight: newW }).eq('id', uid);
+          await supabase.from('weight_log').insert([{ user_id: uid, weight: newW }]);
+          smoothStateUpdate(() => setCurrentWeight(newW));
+          await fetchWeightLog();
+        }
+      }
+      await writeKV(settleKey, today);
     } catch (e) {}
   };
 
@@ -1360,7 +1416,7 @@ function useAppController() {
     waterIntake, addWater, resetWater,
 
     // nutrition
-    dailyCalorieNorm, dailyMacros, consumedCalories, consumedMacros,
+    dailyCalorieNorm, maintenanceCalories, dailyMacros, consumedCalories, consumedMacros,
     isMealModalVisible, setIsMealModalVisible,
     isMealPreviewLoading, mealParse, setMealParse,
     calcClientMeals, confirmClientMeals,

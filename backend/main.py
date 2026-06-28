@@ -1,9 +1,11 @@
 import json
+import logging
 import os
 import re
 import httpx
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +15,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import tgbot  # Telegram-бот оплаты (вебхук). Безопасен при отсутствии BOT_TOKEN.
+
 app = FastAPI()
+
+
+@app.on_event("startup")
+async def _register_tg_webhook():
+    if tgbot.enabled:
+        try:
+            await tgbot.setup_webhook()
+        except Exception:
+            logging.exception("Не удалось установить Telegram webhook")
 
 # Разрешаем запросы с мобильного приложения
 app.add_middleware(
@@ -129,6 +142,37 @@ async def root():
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}
+
+
+# Мост из Telegram обратно в приложение: кнопки Telegram принимают только https,
+# поэтому бот шлёт https://<backend>/open?kind=..., а эта страница редиректит в
+# кастомную схему приложения (mysafeapp://paid). Схема работает после пересборки APK.
+@app.get("/open", response_class=HTMLResponse)
+async def open_app(kind: str = "trainer"):
+    kind = kind if kind in ("trainer", "ai") else "trainer"
+    deeplink = f"mysafeapp://paid?kind={kind}"
+    return f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0; url={deeplink}">
+<title>Открываем приложение…</title>
+<style>body{{background:#0A0C16;color:#fff;font-family:-apple-system,Roboto,sans-serif;
+display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;margin:0}}
+a{{color:#8B5CF6;font-size:18px;text-decoration:none}}</style></head>
+<body><div><p>Возвращаемся в приложение…</p>
+<a href="{deeplink}">Открыть приложение</a></div>
+<script>location.href="{deeplink}";</script></body></html>"""
+
+
+# Вебхук Telegram-бота оплаты. Telegram шлёт сюда апдейты; подлинность — по секретному
+# заголовку (его задаём в set_webhook). Обработка — в tgbot.py.
+@app.post(tgbot.WEBHOOK_PATH if tgbot.WEBHOOK_PATH else "/tg/webhook")
+async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: str = Header(default="")):
+    if not tgbot.enabled:
+        raise HTTPException(status_code=503, detail="bot disabled")
+    if x_telegram_bot_api_secret_token != tgbot.WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="bad secret")
+    await tgbot.feed(await request.json())
+    return {"ok": True}
 
 
 @app.post("/parse")

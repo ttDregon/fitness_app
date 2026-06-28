@@ -5,3 +5,5 @@ supabase
 python-dotenv
 pydantic
 httpx
+aiogram>=3.7,<4
+python-dateutil>=2.8

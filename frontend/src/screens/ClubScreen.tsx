@@ -142,7 +142,8 @@ export default function ClubScreen() {
       <View style={styles.header}>
         <View style={{ flex: 1, marginRight: 15 }}><Text style={styles.pageTitle} numberOfLines={1}>Клубы</Text></View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {userRole === 'trainer' && (<TouchableOpacity onPress={() => openAnimatedModal(setIsCreatingGroup)} style={{ marginRight: 15 }}><Ionicons name="add-circle" size={40} color={COLORS.rose} /></TouchableOpacity>)}
+          {userRole === 'trainer' && (<TouchableOpacity onPress={() => openAnimatedModal(setIsCreatingGroup)} style={{ marginRight: 14 }}><Ionicons name="add-circle" size={38} color={COLORS.rose} /></TouchableOpacity>)}
+          <TouchableOpacity onPress={() => openAnimatedModal(setIsJoiningGroup)} style={{ marginRight: 14 }}><Ionicons name="enter-outline" size={34} color={COLORS.rose} /></TouchableOpacity>
           <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
         </View>
       </View>
@@ -156,17 +157,14 @@ export default function ClubScreen() {
           </View>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.groupsGrid} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
           {groups.map((group: Group) => (
-            <TouchableOpacity key={group.id} style={[styles.groupSquare, { borderColor: 'rgba(251,113,133,0.25)' }]} onPress={() => { smoothStateUpdate(() => setActiveGroup(group)); }}>
-              <Ionicons name="people" size={46} color={COLORS.rose} />
-              <Text style={styles.groupSquareText} numberOfLines={1}>{group.name}</Text>
+            <TouchableOpacity key={group.id} style={clubCard} onPress={() => { smoothStateUpdate(() => setActiveGroup(group)); }}>
+              <View style={clubIconWrap}><Ionicons name="people" size={28} color={COLORS.rose} /></View>
+              <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 18, fontWeight: '800' }} numberOfLines={1}>{group.name}</Text>
+              <Ionicons name="chevron-forward" size={24} color={COLORS.textSecondary} />
             </TouchableOpacity>
           ))}
-          <TouchableOpacity style={[styles.groupSquare, {backgroundColor: 'rgba(255,255,255,0.03)', borderStyle: 'dashed', borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)'}]} onPress={() => openAnimatedModal(setIsJoiningGroup)}>
-            <Ionicons name="enter-outline" size={46} color={COLORS.textSecondary} />
-            <Text style={[styles.groupSquareText, {color: COLORS.textSecondary}]}>Вступить</Text>
-          </TouchableOpacity>
         </ScrollView>
       )}
 
@@ -198,3 +196,29 @@ export default function ClubScreen() {
     </View>
   );
 }
+
+// Прямоугольная карточка клуба (вместо квадрата в сетке).
+const clubCard = {
+  flexDirection: 'row' as const,
+  alignItems: 'center' as const,
+  backgroundColor: COLORS.card,
+  borderRadius: 24,
+  padding: 16,
+  marginBottom: 14,
+  borderWidth: 1,
+  borderColor: 'rgba(251,113,133,0.25)',
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 8 },
+  shadowOpacity: 0.22,
+  shadowRadius: 14,
+  elevation: 4,
+};
+const clubIconWrap = {
+  width: 52,
+  height: 52,
+  borderRadius: 16,
+  backgroundColor: 'rgba(251,113,133,0.15)',
+  alignItems: 'center' as const,
+  justifyContent: 'center' as const,
+  marginRight: 14,
+};

@@ -144,6 +144,8 @@ function useAppController() {
     if (tabName === currentTab) return;
     Animated.timing(contentFadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
       setCurrentTab(tabName);
+      // Если состоишь ровно в одном клубе — открываем его сразу, без лишнего тапа по карточке.
+      if (tabName === 'club' && !activeGroup && groups.length === 1) setActiveGroup(groups[0]);
       Animated.timing(contentFadeAnim, { toValue: 1, duration: 250, useNativeDriver: true }).start();
     });
   };
@@ -889,6 +891,7 @@ function useAppController() {
     setJoinCode('');
     closeAnimatedModal(setIsJoiningGroup);
     await fetchGroups();
+    smoothStateUpdate(() => setActiveGroup(targetGroup)); // сразу заходим в клуб после вступления
     Alert.alert("Успех", "Вы вступили в клуб!");
   };
 

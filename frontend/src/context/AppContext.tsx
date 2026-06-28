@@ -1300,34 +1300,16 @@ function useAppController() {
       targetLineData = new Array(weights.length).fill(tw);
     }
 
-    // Фантомный датасет для корректных границ Y-оси
-    const phantomData = weights.map((_, i) => i === 0 ? yMin : yMax);
-
+    // Один чистый датасет реальных значений. Раньше тут были «фантомные» датасеты
+    // (целевая линия + линия границ оси) — chart-kit заливал площадь под каждым,
+    // из-за чего появлялись лишние фиолетовые пятна заливки.
     const datasets: any[] = [
       {
         data: weights,
         strokeWidth: 3,
-        color: (opacity = 1) => `rgba(139, 92, 246, ${opacity})`,
+        color: (opacity = 1) => `rgba(167, 139, 250, ${opacity})`,
       },
     ];
-
-    // Линия целевого веса
-    if (targetLineData) {
-      datasets.push({
-        data: targetLineData,
-        strokeWidth: 2,
-        color: () => 'rgba(245, 158, 11, 0.8)',
-        withDots: false,
-      });
-    }
-
-    // Фантомный датасет для Y-границ
-    datasets.push({
-      data: phantomData,
-      strokeWidth: 0,
-      color: () => 'rgba(0, 0, 0, 0)',
-      withDots: false,
-    });
 
     return {
       labels,

@@ -122,31 +122,33 @@ export default function HomeScreen() {
 
         {chartPeriod !== 'day' && rawData.length > 0 && (
           <LineChart
-            key={`chart-${rawData.length}-${chartPeriod}-${tw || 'no'}`}
+            key={`chart-${rawData.length}-${chartPeriod}`}
             data={{ labels: chartDataMemo.labels, datasets: chartDataMemo.datasets }}
-            width={screenWidth - 80}
-            height={200}
+            width={screenWidth - 76}
+            height={220}
             yAxisSuffix=""
-            yAxisInterval={1}
+            segments={4}
             withOuterLines={false}
             withVerticalLines={false}
+            withHorizontalLines={true}
             chartConfig={{
-              backgroundColor: COLORS.card,
               backgroundGradientFrom: COLORS.card,
               backgroundGradientTo: COLORS.card,
+              backgroundGradientFromOpacity: 0,
+              backgroundGradientToOpacity: 0,
               decimalPlaces: 1,
-              color: (opacity = 1) => `rgba(139, 92, 246, ${opacity})`,
-              labelColor: (opacity = 1) => `rgba(248, 250, 252, 0.4)`,
+              color: (opacity = 1) => `rgba(167, 139, 250, ${opacity})`,
+              labelColor: () => 'rgba(245, 247, 255, 0.5)',
               style: { borderRadius: 16 },
-              propsForDots: { r: '4', strokeWidth: '0', fill: COLORS.tabBar },
-              propsForBackgroundLines: { strokeWidth: 1, stroke: 'rgba(255,255,255,0.05)', strokeDasharray: '0' },
-              fillShadowGradientFrom: COLORS.tabBar,
-              fillShadowGradientFromOpacity: 0.25,
+              propsForDots: { r: '4', strokeWidth: '2', stroke: COLORS.card, fill: COLORS.accentHover },
+              propsForBackgroundLines: { strokeWidth: 1, stroke: 'rgba(255,255,255,0.06)', strokeDasharray: '4 8' },
+              fillShadowGradientFrom: COLORS.accentHover,
+              fillShadowGradientFromOpacity: 0.32,
               fillShadowGradientTo: COLORS.card,
               fillShadowGradientToOpacity: 0,
             }}
             bezier
-            style={{ marginVertical: 8, borderRadius: 16, marginLeft: -12 }}
+            style={{ marginVertical: 8, borderRadius: 16, marginLeft: -8 }}
             fromZero={false}
           />
         )}

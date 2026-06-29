@@ -63,6 +63,9 @@ function useAppController() {
   const [aiPlan, setAiPlan] = useState<string>('free');
   const [aiUntil, setAiUntil] = useState<string | null>(null);
   const [paywall, setPaywall] = useState<null | 'trainer' | 'ai'>(null);
+  // Тариф тренера, выбранный на экране регистрации до создания аккаунта: оплату
+  // открываем, как только появится сессия (нужен userId, чтобы бот знал кого активировать).
+  const [pendingTrainerPlan, setPendingTrainerPlan] = useState<string | null>(null);
   const [dailyMacros, setDailyMacros] = useState<Macros>({ protein: 0, fat: 0, carb: 0 });
   const [consumedCalories, setConsumedCalories] = useState<number>(0);
   const [consumedMacros, setConsumedMacros] = useState<Macros>({ protein: 0, fat: 0, carb: 0 });
@@ -559,6 +562,16 @@ function useAppController() {
     const sub = Linking.addEventListener('url', (e) => handleUrl(e.url));
     return () => sub.remove();
   }, []);
+
+  // Тренер выбрал тариф при регистрации → после создания аккаунта (сессия готова)
+  // открываем оплату выбранного тарифа в Telegram.
+  useEffect(() => {
+    if (session?.user?.id && pendingTrainerPlan) {
+      const plan = pendingTrainerPlan;
+      setPendingTrainerPlan(null);
+      openCheckout('trainer', plan);
+    }
+  }, [session, pendingTrainerPlan]);
 
   // Как только подписка стала активной — автоматически закрываем paywall и сообщаем об успехе.
   useEffect(() => {
@@ -1536,6 +1549,7 @@ function useAppController() {
     dailyCalorieNorm, maintenanceCalories, dailyMacros, consumedCalories, consumedMacros,
     // подписки
     paywall, setPaywall, trainerSubActive, aiUnlimited, requireTrainerSub, openCheckout, refreshSubscription,
+    setPendingTrainerPlan,
     isMealModalVisible, setIsMealModalVisible,
     isMealPreviewLoading, mealParse, setMealParse,
     calcClientMeals, confirmClientMeals,

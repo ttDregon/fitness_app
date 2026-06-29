@@ -11,7 +11,7 @@ import { useApp } from '../context/AppContext';
 export default function AuthScreen() {
   const {
     authMode, setAuthMode, email, setEmail, password, setPassword, confirmPassword, setConfirmPassword,
-    name, setName, isLoadingAuth, handleLogin, smoothStateUpdate, setUserRole,
+    name, setName, isLoadingAuth, handleLogin, smoothStateUpdate, setUserRole, setPendingTrainerPlan,
     handleCredentialsNext, handleGoalNext, workoutsPerWeek, setWorkoutsPerWeek, goal,
     userGender, setUserGender, userAge, setUserAge,
     userHeightWhole, setUserHeightWhole, userHeightDec, setUserHeightDec,
@@ -51,18 +51,26 @@ export default function AuthScreen() {
     return (
       <View style={styles.authContainer}>
         <Text style={styles.title}>Подписка «Тренер»</Text>
-        <Text style={styles.subtitle}>Роль тренера — по подписке. Спортсмены пользуются бесплатно.</Text>
+        <Text style={styles.subtitle}>Выберите тариф — оплата в Telegram откроется сразу после регистрации.</Text>
         {TRAINER_PLANS.map(p => (
-          <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 18, padding: 18, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(251,113,133,0.3)' }}>
-            <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }}>{p.label}</Text>
+          <TouchableOpacity
+            key={p.id}
+            activeOpacity={0.85}
+            onPress={() => { smoothStateUpdate(() => { setPendingTrainerPlan(p.id); setAuthMode('register_credentials'); }); }}
+            style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 18, padding: 18, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(251,113,133,0.3)' }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }}>{p.label}</Text>
+              <Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 3 }}>Выбрать и оплатить после регистрации →</Text>
+            </View>
             <Text style={{ color: COLORS.rose, fontSize: 18, fontWeight: '900' }}>{p.priceUah} грн</Text>
-          </View>
+          </TouchableOpacity>
         ))}
         <Text style={{ color: COLORS.textMuted, fontSize: 13, textAlign: 'center', marginVertical: 14, lineHeight: 19 }}>
-          Оплата — в Telegram после регистрации. Без подписки тренерские функции закрыты, но аккаунт и личные функции доступны.
+          Без подписки тренерские функции закрыты, но аккаунт и личные функции доступны.
         </Text>
         <GradientButton colors={GRADIENTS.rose} style={styles.button} onPress={() => { smoothStateUpdate(() => setAuthMode('register_credentials')); }}>
-          <Text style={styles.buttonText}>Продолжить регистрацию →</Text>
+          <Text style={styles.buttonText}>Продолжить без подписки →</Text>
         </GradientButton>
         <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode('role_select')); }} style={styles.backButton}><Text style={styles.backButtonText}>← Назад к выбору роли</Text></TouchableOpacity>
       </View>

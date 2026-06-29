@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Animated, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Animated, Alert, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GradientButton } from '../components/Gradient';
 import { styles } from '../styles';
@@ -21,6 +21,15 @@ export default function ClubScreen() {
     modalOpacityAnim, modalScaleAnim, closeAnimatedModal, requireTrainerSub,
   } = useApp();
 
+  // Поделиться приглашением в клуб: код + диплинк (откроет приложение после пересборки).
+  const shareInvite = async (group: Group) => {
+    try {
+      await Share.share({
+        message: `Вступай в мой клуб «${group.name}» в Striva 💪\n\nКод клуба: ${group.code}\nСсылка: mysafeapp://join?code=${group.code}\n\nВ приложении Striva нажми «Вступить по коду» и введи код.`,
+      });
+    } catch (e) {}
+  };
+
   const calculateProgress = (memberId: string) => {
     const w = todayWorkouts.find((plan: AssignedWorkout) => plan.client_id === memberId);
     if (!w || !Array.isArray(w.workout_data) || w.workout_data.length === 0) return 0;
@@ -37,7 +46,10 @@ export default function ClubScreen() {
         <View style={styles.groupHeader}>
           <TouchableOpacity onPress={() => { smoothStateUpdate(() => { setActiveGroup(null); setGroupMembers([]); setTodayWorkouts([]); }); }}><Ionicons name="arrow-back" size={32} color={COLORS.textPrimary} /></TouchableOpacity>
           <Text style={styles.groupHeaderTitle} numberOfLines={1}>{activeGroup.name}</Text>
-          <TouchableOpacity onPress={() => {Alert.alert(isOwner ? "Настройки" : "Клуб", `Код доступа: ${activeGroup.code}`, [{ text: isOwner ? "Удалить клуб" : "Выйти из клуба", style: "destructive", onPress: () => deleteOrLeaveGroup(activeGroup) }, { text: "Закрыть", style: "cancel" }]);}}><Ionicons name="settings-sharp" size={28} color={COLORS.textPrimary} /></TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity onPress={() => shareInvite(activeGroup)} style={{ marginRight: 16 }}><Ionicons name="share-social-outline" size={26} color={COLORS.textPrimary} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => {Alert.alert(isOwner ? "Настройки" : "Клуб", `Код доступа: ${activeGroup.code}`, [{ text: "Поделиться приглашением", onPress: () => shareInvite(activeGroup) }, { text: isOwner ? "Удалить клуб" : "Выйти из клуба", style: "destructive", onPress: () => deleteOrLeaveGroup(activeGroup) }, { text: "Закрыть", style: "cancel" }]);}}><Ionicons name="settings-sharp" size={28} color={COLORS.textPrimary} /></TouchableOpacity>
+          </View>
         </View>
 
         <ScrollView contentContainerStyle={{padding: 20, paddingBottom: 100}} showsVerticalScrollIndicator={false}>

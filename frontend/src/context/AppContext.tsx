@@ -66,6 +66,8 @@ function useAppController() {
   // Тариф тренера, выбранный на экране регистрации до создания аккаунта: оплату
   // открываем, как только появится сессия (нужен userId, чтобы бот знал кого активировать).
   const [pendingTrainerPlan, setPendingTrainerPlan] = useState<string | null>(null);
+  // Код клуба из пригласительной ссылки (mysafeapp://join?code=...): вступаем, как появится сессия.
+  const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
   const [dailyMacros, setDailyMacros] = useState<Macros>({ protein: 0, fat: 0, carb: 0 });
   const [consumedCalories, setConsumedCalories] = useState<number>(0);
   const [consumedMacros, setConsumedMacros] = useState<Macros>({ protein: 0, fat: 0, carb: 0 });
@@ -556,12 +558,15 @@ function useAppController() {
     return () => sub.remove();
   }, []);
 
-  // 2) Диплинк из Telegram-бота (mysafeapp://paid?kind=trainer|ai) — работает после пересборки
-  //    (схема регистрируется нативно). Открывает приложение и сразу проверяет подписку.
+  // 2) Диплинки приложения (mysafeapp://...) — работают после пересборки (схема нативная):
+  //    paid?kind=...  — возврат из Telegram-бота → проверяем подписку;
+  //    join?code=...  — приглашение в клуб → вступаем (после входа, если ещё не залогинен).
   useEffect(() => {
     const handleUrl = (url: string | null) => {
-      if (!url || url.indexOf('paid') === -1) return;
-      pollSubscriptionActivation(/kind=ai/.test(url) ? 'ai' : 'trainer');
+      if (!url) return;
+      if (url.indexOf('paid') !== -1) { pollSubscriptionActivation(/kind=ai/.test(url) ? 'ai' : 'trainer'); return; }
+      const m = url.match(/[?&]code=(\d{4,8})/);
+      if (url.indexOf('join') !== -1 && m) setPendingInviteCode(m[1]);
     };
     Linking.getInitialURL().then(handleUrl).catch(() => {});
     const sub = Linking.addEventListener('url', (e) => handleUrl(e.url));
@@ -1049,10 +1054,12 @@ function useAppController() {
     await fetchGroups();
   };
 
-  const joinGroup = async () => {
-    if (joinCode.length < 6) return;
+  // Вступление по коду (общая логика для модалки и для пригласительной ссылки).
+  const joinByInviteCode = async (rawCode: string) => {
+    const code = (rawCode || '').trim();
+    if (code.length < 6) return;
     // Поиск по коду и вступление — через защищённую RPC (groups закрыт RLS).
-    const { data, error } = await supabase.rpc('join_group_by_code', { p_code: joinCode });
+    const { data, error } = await supabase.rpc('join_group_by_code', { p_code: code });
     if (error) {
       const notFound = (error.message || '').includes('group_not_found');
       Alert.alert("Ошибка", notFound ? "Клуб не найден." : error.message);
@@ -1060,17 +1067,29 @@ function useAppController() {
     }
     const targetGroup = (Array.isArray(data) ? data[0] : data) as Group;
     if (!targetGroup) { Alert.alert("Ошибка", "Клуб не найден."); return; }
-    if (groups.some((g: Group) => g.id === targetGroup.id)) {
-      Alert.alert("Инфо", "Вы уже состоите в этом клубе.");
-      smoothStateUpdate(() => setJoinCode('')); closeAnimatedModal(setIsJoiningGroup);
-      return;
-    }
-    setJoinCode('');
-    closeAnimatedModal(setIsJoiningGroup);
+    const already = groups.some((g: Group) => g.id === targetGroup.id);
     await fetchGroups();
-    smoothStateUpdate(() => setActiveGroup(targetGroup)); // сразу заходим в клуб после вступления
-    Alert.alert("Успех", "Вы вступили в клуб!");
+    smoothStateUpdate(() => { setActiveGroup(targetGroup); setCurrentTab('club'); }); // сразу заходим в клуб
+    Alert.alert(already ? "Инфо" : "Успех", already ? `Вы уже в клубе «${targetGroup.name}».` : `Вы вступили в клуб «${targetGroup.name}»!`);
   };
+
+  const joinGroup = async () => {
+    if (joinCode.length < 6) return;
+    const code = joinCode;
+    smoothStateUpdate(() => setJoinCode(''));
+    closeAnimatedModal(setIsJoiningGroup);
+    await joinByInviteCode(code);
+  };
+
+  // Пригласительная ссылка: как только есть сессия и отложенный код — вступаем автоматически.
+  useEffect(() => {
+    if (session?.user?.id && pendingInviteCode) {
+      const code = pendingInviteCode;
+      setPendingInviteCode(null);
+      joinByInviteCode(code);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, pendingInviteCode]);
 
   const deleteOrLeaveGroup = async (group: Group) => {
     if (group.owner_id === session?.user?.id) {

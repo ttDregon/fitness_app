@@ -1033,17 +1033,20 @@ function useAppController() {
 
   const joinGroup = async () => {
     if (joinCode.length < 6) return;
-    const { data: foundGroups, error: findError } = await supabase.from('groups').select('*').eq('code', joinCode);
-    if (findError) { Alert.alert("Ошибка", findError.message); return; }
-    if (!foundGroups || foundGroups.length === 0) { Alert.alert("Ошибка", "Клуб не найден."); return; }
-    const targetGroup = foundGroups[0] as Group;
+    // Поиск по коду и вступление — через защищённую RPC (groups закрыт RLS).
+    const { data, error } = await supabase.rpc('join_group_by_code', { p_code: joinCode });
+    if (error) {
+      const notFound = (error.message || '').includes('group_not_found');
+      Alert.alert("Ошибка", notFound ? "Клуб не найден." : error.message);
+      return;
+    }
+    const targetGroup = (Array.isArray(data) ? data[0] : data) as Group;
+    if (!targetGroup) { Alert.alert("Ошибка", "Клуб не найден."); return; }
     if (groups.some((g: Group) => g.id === targetGroup.id)) {
       Alert.alert("Инфо", "Вы уже состоите в этом клубе.");
       smoothStateUpdate(() => setJoinCode('')); closeAnimatedModal(setIsJoiningGroup);
       return;
     }
-    const { error: joinError } = await supabase.from('group_members').insert([{ group_id: targetGroup.id, user_id: session?.user?.id }]);
-    if (joinError) { Alert.alert("Ошибка", joinError.message); return; }
     setJoinCode('');
     closeAnimatedModal(setIsJoiningGroup);
     await fetchGroups();

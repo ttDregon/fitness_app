@@ -153,7 +153,7 @@ export default function ClubScreen() {
           <Text style={styles.emptyText}>Вы еще не состоите в клубах</Text>
           <View style={styles.actionButtonsRow}>
             {userRole === 'trainer' && (<GradientButton colors={GRADIENTS.rose} style={styles.centerActionBtn} onPress={() => { if (!requireTrainerSub()) return; openAnimatedModal(setIsCreatingGroup); }}><Text style={styles.buttonText}>Создать клуб</Text></GradientButton>)}
-            <TouchableOpacity style={[styles.centerActionBtn, {backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', marginTop: 15}]} onPress={() => openAnimatedModal(setIsJoiningGroup)}><Text style={[styles.buttonText, {color: COLORS.textPrimary}]}>Вступить по коду</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.centerActionBtn, {backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', marginTop: 15, elevation: 0}]} onPress={() => openAnimatedModal(setIsJoiningGroup)}><Text style={[styles.buttonText, {color: COLORS.textPrimary}]}>Вступить по коду</Text></TouchableOpacity>
           </View>
         </View>
       ) : (

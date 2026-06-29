@@ -23,7 +23,7 @@ export default function AuthScreen() {
   if (authMode === 'login') {
     return (
       <View style={styles.authContainer}>
-        <Text style={styles.title}>FitnessApp</Text>
+        <Text style={styles.title}>Striva</Text>
         <Text style={styles.subtitle}>Вход в систему</Text>
         <TextInput style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textSecondary} value={email} onChangeText={setEmail} autoCapitalize="none" />
         <TextInput style={styles.input} placeholder="Пароль" placeholderTextColor={COLORS.textSecondary} secureTextEntry value={password} onChangeText={setPassword} />

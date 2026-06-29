@@ -8,7 +8,7 @@ import jwt
 from collections import defaultdict
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Request, Header
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,12 +39,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Отсекаем слишком большие тела запросов ещё до чтения (защита от memory-DoS).
+MAX_BODY_BYTES = 256_000
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    cl = request.headers.get("content-length")
+    if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
+        return JSONResponse(status_code=413, content={"detail": "Тело запроса слишком большое"})
+    return await call_next(request)
+
 # --- НАСТРОЙКИ DEEPSEEK ---
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
 client = OpenAI(
     api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com"
+    base_url="https://api.deepseek.com",
+    timeout=30,         # не держим воркер, если DeepSeek завис
+    max_retries=1,
 )
 
 # --- НАСТРОЙКИ SUPABASE ---
@@ -154,6 +166,8 @@ _RL = defaultdict(list)
 
 def _rate_ok(key: str, limit: int = 30, window: int = 60) -> bool:
     now = time.time()
+    if len(_RL) > 20000:   # защита от роста словаря при ротации IP
+        _RL.clear()
     q = _RL[key]
     while q and q[0] < now - window:
         q.pop(0)
@@ -289,13 +303,14 @@ async def parse_workout(note: WorkoutNote, request: Request, authorization: Opti
         }
     except Exception as e:
         print(f"❌ Ошибка парсинга: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Ошибка обработки запроса")
 
 
 @app.post("/parse_meal")
-async def parse_meal(data: dict):
+async def parse_meal(data: dict, request: Request, authorization: Optional[str] = Header(default=None)):
+    _guard_rate(request, authorization, data.get("user_id"), "parse_meal")
     text = data.get("text", "")
-    
+
     prompt = f"""
     Проанализируй блюдо: "{text}".
     Верни ТОЛЬКО валидный JSON без текста, комментариев и форматирования markdown.
@@ -382,7 +397,9 @@ async def parse_meals(data: dict, request: Request, authorization: Optional[str]
 
 
 @app.post("/calculate_loss")
-async def calculate_loss(payload: WorkoutLossPayload):
+async def calculate_loss(payload: WorkoutLossPayload, request: Request):
+    if not _rate_ok(f"calc:{_client_ip(request)}", limit=60):
+        raise HTTPException(status_code=429, detail="Слишком много запросов")
     print(f"\n--- РАСЧЕТ СОЖЖЕННЫХ КАЛОРИЙ ЧЕРЕЗ ЧАС ---")
     total_sets = len(payload.exercises)
     burned_kcal = total_sets * 15 
@@ -395,7 +412,7 @@ async def calculate_loss(payload: WorkoutLossPayload):
 
 
 @app.post("/notify")
-async def notify(req: NotifyRequest, authorization: Optional[str] = Header(default=None)):
+async def notify(req: NotifyRequest, request: Request, authorization: Optional[str] = Header(default=None)):
     """Отправить пуш-уведомление пользователю через Expo Push API.
 
     Берём все push-токены пользователя из таблицы push_tokens и шлём сообщение.
@@ -408,6 +425,8 @@ async def notify(req: NotifyRequest, authorization: Optional[str] = Header(defau
     пуши кому угодно.
     """
     caller = _auth_uid(authorization, None)
+    if not _rate_ok(f"notify:{caller or _client_ip(request)}", limit=20):
+        raise HTTPException(status_code=429, detail="Слишком много запросов")
     if SUPABASE_JWT_SECRET and caller != req.to_user_id and not _is_trainer_of(caller, req.to_user_id):
         raise HTTPException(status_code=403, detail="Нет прав отправлять этому пользователю")
     try:
@@ -539,4 +558,4 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
         }
     except Exception as e:
         print(f"❌ Ошибка чата: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Ошибка обработки запроса")

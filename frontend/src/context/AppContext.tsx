@@ -1285,7 +1285,7 @@ function useAppController() {
         saveNutritionDataLocally( consumedCalories + data.calories, consumedMacros.protein + (data.protein || 0), consumedMacros.fat + (data.fat || 0), consumedMacros.carb + (data.carbs || 0) );
       }
     } catch (error) {
-      const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "К сожалению я не могу вам с этим помочь", sender: 'ai' };
+      const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "Не удалось связаться с ИИ. Проверьте интернет и попробуйте ещё раз.", sender: 'ai' };
       smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, errorMsg], updatedAt: Date.now() } : c)));
     } finally { setIsChatLoading(false); }
   };
@@ -1327,7 +1327,7 @@ function useAppController() {
         saveNutritionDataLocally( consumedCalories + data.calories, consumedMacros.protein + (data.protein || 0), consumedMacros.fat + (data.fat || 0), consumedMacros.carb + (data.carbs || 0) );
       }
     } catch (error) {
-      const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "К сожалению я не могу вам с этим помочь", sender: 'ai' };
+      const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "Не удалось связаться с ИИ. Проверьте интернет и попробуйте ещё раз.", sender: 'ai' };
       smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, errorMsg], updatedAt: Date.now() } : c)));
     } finally { setIsChatLoading(false); }
   };

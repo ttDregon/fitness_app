@@ -6,6 +6,7 @@ import { styles } from '../styles';
 import { COLORS, GRADIENTS } from '../theme';
 import { groupWorkoutData } from '../utils/workout';
 import { useApp } from '../context/AppContext';
+import { appAlert } from '../components/AppAlert';
 import { EXERCISES, EXERCISE_GROUPS } from '../data/exercises';
 import type { ExerciseDef } from '../data/exercises';
 import type { WorkoutRecord, GroupedWorkout, WorkoutData } from '../types';
@@ -80,7 +81,7 @@ export default function WorkoutScreen() {
   const saveBlocks = async () => {
     const items = blocks
       .flatMap(b => b.sets.filter(isFilled).map(s => ({ exercise: b.exercise, weight: Number(s.weight) || 0, reps: Number(s.reps) || 0 })));
-    if (items.length === 0) { Alert.alert('Пусто', 'Заполни вес или повторы хотя бы в одном подходе.'); return; }
+    if (items.length === 0) { appAlert('Пусто', 'Заполни вес или повторы хотя бы в одном подходе.'); return; }
     const ok = await addStructuredWorkout(items);
     if (ok) { setBlocks([]); setDayIdx(Math.max(0, dayGroups.keys.length - 1)); }
   };

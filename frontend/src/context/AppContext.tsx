@@ -6,6 +6,7 @@ import { getCurrentDateString } from '../utils/date';
 import { tgCheckoutUrl } from '../config/billing';
 import { parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl, notifyUser } from '../api/backend';
 import { configureNotificationHandler, registerForPushNotificationsAsync, scheduleLocalReminder, cancelAllScheduled, Notifications } from '../lib/notifications';
+import { appAlert } from '../components/AppAlert';
 import type {
   Session, WorkoutData, SavedAccount, Group, GroupMember, WeightLog,
   WorkoutRecord, AssignedWorkout, TrainingSession, ChatMessage, ChatSession, Macros, MealPreview,
@@ -515,7 +516,7 @@ function useAppController() {
     // подписку проверим автоматически — без ручного «Я оплатил».
     pendingCheckoutRef.current = { kind, at: Date.now() };
     Linking.openURL(tgCheckoutUrl(kind, planId, session?.user?.id))
-      .catch(() => Alert.alert('Telegram', 'Не удалось открыть Telegram. Установлен ли он?'));
+      .catch(() => appAlert('Telegram', 'Не удалось открыть Telegram. Установлен ли он?'));
   };
   const refreshSubscription = async () => { await fetchUserProfileData(); };
 
@@ -588,11 +589,11 @@ function useAppController() {
     if (paywall === 'trainer' && trainerSubActive) {
       setPaywall(null);
       pendingCheckoutRef.current = null;
-      Alert.alert('Готово', 'Подписка тренера активирована.');
+      appAlert('Готово', 'Подписка тренера активирована.');
     } else if (paywall === 'ai' && aiSubActive) {
       setPaywall(null);
       pendingCheckoutRef.current = null;
-      Alert.alert('Готово', 'Подписка на ИИ активирована.');
+      appAlert('Готово', 'Подписка на ИИ активирована.');
     }
   }, [paywall, trainerSubActive, aiSubActive]);
 
@@ -700,7 +701,7 @@ function useAppController() {
       if (err?.code === '42501') {
       } else {
         console.error('Weight update error:', err);
-        Alert.alert('Ошибка', 'Не удалось сохранить вес. Проверьте подключение.');
+        appAlert('Ошибка', 'Не удалось сохранить вес. Проверьте подключение.');
       }
     } finally {
       setIsLoading(false);
@@ -800,7 +801,7 @@ function useAppController() {
     await supabase.auth.signOut();
     const { data, error } = await supabase.auth.signInWithPassword({ email: account.email, password: account.password });
     if (error) {
-      Alert.alert("Ошибка", "Пароль был изменен. Войдите заново.");
+      appAlert("Ошибка", "Пароль был изменен. Войдите заново.");
       const updated = savedAccounts.filter((a: SavedAccount) => a.id !== account.id);
       setSavedAccounts(updated);
       if (Platform.OS !== 'web') { await AsyncStorage.setItem('savedAccounts', JSON.stringify(updated)); } else { if (typeof window !== 'undefined') window.localStorage.setItem('savedAccounts', JSON.stringify(updated)); }
@@ -955,7 +956,7 @@ function useAppController() {
     if (!requireTrainerSub()) return;
     if (!schedDate || !schedTime || !schedSelectedMember) return;
     const { error } = await supabase.from('training_sessions').insert([{ group_id: schedSelectedGroup?.id, client_id: schedSelectedMember.id, trainer_id: session?.user?.id, session_date: schedDate, session_time: schedTime }]);
-    if (error) Alert.alert("Ошибка", error.message);
+    if (error) appAlert("Ошибка", error.message);
     else {
       notifyUser(schedSelectedMember.id, 'Новая запись на тренировку 📅', `${schedDate} в ${schedTime}${schedSelectedGroup?.name ? ` · ${schedSelectedGroup.name}` : ''}`, { tab: 'home' });
       closeAnimatedModal(setIsSchedulingVisible); fetchUpcomingSessions(); setSchedSelectedGroup(null); setSchedSelectedMember(null);
@@ -1014,7 +1015,7 @@ function useAppController() {
     setIsLoading(true);
     try {
       const aiData = await parseWorkout(assignNote, session?.user?.id);
-      if (aiData?.status === 'limit_reached') { Alert.alert('Лимит разбора', `Разбор тренировок: ${aiData.limit}/день. Лимит на сегодня исчерпан.`); return; }
+      if (aiData?.status === 'limit_reached') { appAlert('Лимит разбора', `Разбор тренировок: ${aiData.limit}/день. Лимит на сегодня исчерпан.`); return; }
       if (!aiData || !Array.isArray(aiData.parsed_data)) throw new Error('ИИ вернул данные в неверном формате');
       const newExercises: WorkoutData[] = aiData.parsed_data.map((item: any, index: number) => ({ ...item, id: `task_${Date.now()}_${index}`, completed: false }));
       const targetDate = assignWorkoutDate;
@@ -1024,8 +1025,8 @@ function useAppController() {
       const { error } = await supabase.from('assigned_workouts').upsert({ group_id: activeGroup?.id, client_id: selectedMember?.id, trainer_id: session?.user?.id, date: targetDate, workout_data: finalWorkoutData }, { onConflict: 'client_id, date' });
       if (error) throw error;
       if (selectedMember?.id) notifyUser(selectedMember.id, 'Новый план тренировки 🏋️', `Тренер обновил тренировку на ${targetDate === getCurrentDateString() ? 'сегодня' : targetDate}`, { tab: 'club' });
-      setAssignNote(''); fetchGroupDetails(); loadMemberDayPlan(); Alert.alert('Успех', 'План дополнен!');
-    } catch (e: any) { Alert.alert('Ошибка', e.message); } finally { setIsLoading(false); }
+      setAssignNote(''); fetchGroupDetails(); loadMemberDayPlan(); appAlert('Успех', 'План дополнен!');
+    } catch (e: any) { appAlert('Ошибка', e.message); } finally { setIsLoading(false); }
   };
 
   const toggleExerciseStatus = async (workoutId: string, exerciseId: string | undefined, currentStatus: boolean) => {
@@ -1046,9 +1047,9 @@ function useAppController() {
     if (!newGroupName.trim()) return;
     const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
     const { data, error } = await supabase.from('groups').insert([{ name: newGroupName, code: randomCode, owner_id: session?.user?.id }]).select();
-    if (error) { Alert.alert("Ошибка", error.message); return; }
+    if (error) { appAlert("Ошибка", error.message); return; }
     const created = (data as Group[] | null)?.[0];
-    if (!created) { Alert.alert("Ошибка", "Не удалось создать клуб. Попробуйте ещё раз."); return; }
+    if (!created) { appAlert("Ошибка", "Не удалось создать клуб. Попробуйте ещё раз."); return; }
     setNewGroupName('');
     closeAnimatedModal(setIsCreatingGroup);
     await fetchGroups();
@@ -1062,15 +1063,15 @@ function useAppController() {
     const { data, error } = await supabase.rpc('join_group_by_code', { p_code: code });
     if (error) {
       const notFound = (error.message || '').includes('group_not_found');
-      Alert.alert("Ошибка", notFound ? "Клуб не найден." : error.message);
+      appAlert("Ошибка", notFound ? "Клуб не найден." : error.message);
       return;
     }
     const targetGroup = (Array.isArray(data) ? data[0] : data) as Group;
-    if (!targetGroup) { Alert.alert("Ошибка", "Клуб не найден."); return; }
+    if (!targetGroup) { appAlert("Ошибка", "Клуб не найден."); return; }
     const already = groups.some((g: Group) => g.id === targetGroup.id);
     await fetchGroups();
     smoothStateUpdate(() => { setActiveGroup(targetGroup); setCurrentTab('club'); }); // сразу заходим в клуб
-    Alert.alert(already ? "Инфо" : "Успех", already ? `Вы уже в клубе «${targetGroup.name}».` : `Вы вступили в клуб «${targetGroup.name}»!`);
+    appAlert(already ? "Инфо" : "Успех", already ? `Вы уже в клубе «${targetGroup.name}».` : `Вы вступили в клуб «${targetGroup.name}»!`);
   };
 
   const joinGroup = async () => {
@@ -1100,7 +1101,7 @@ function useAppController() {
   };
 
   const handleDeleteAccount = () => {
-    Alert.alert("Удаление", "Удалить аккаунт навсегда?", [
+    appAlert("Удаление", "Удалить аккаунт навсегда?", [
       { text: "Отмена", style: "cancel" },
       { text: "Удалить", style: "destructive", onPress: async () => {
           setIsLoading(true);
@@ -1125,12 +1126,12 @@ function useAppController() {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       if (data.user) await saveAccountToLocal(data.user, password);
-    } catch (error: unknown) { Alert.alert('Ошибка авторизации', (error as any)?.message || 'Unknown error'); } finally { setIsLoadingAuth(false); }
+    } catch (error: unknown) { appAlert('Ошибка авторизации', (error as any)?.message || 'Unknown error'); } finally { setIsLoadingAuth(false); }
   };
 
   const handleCredentialsNext = () => {
     if (!name || !email || !password || !confirmPassword) return;
-    if (password !== confirmPassword) { Alert.alert("Ошибка", "Пароли не совпадают"); return; }
+    if (password !== confirmPassword) { appAlert("Ошибка", "Пароли не совпадают"); return; }
     smoothStateUpdate(() => setAuthMode('register_goal'));
   };
 
@@ -1142,7 +1143,7 @@ function useAppController() {
   };
 
   const handleFinalRegister = async () => {
-    if (!userGender) { Alert.alert("Ошибка", "Пожалуйста, выберите пол"); return; }
+    if (!userGender) { appAlert("Ошибка", "Пожалуйста, выберите пол"); return; }
     setIsLoadingAuth(true);
     try {
       const { data: authData, error: authError } = await supabase.auth.signUp({ email, password, options: { data: { role: userRole, name: name } } });
@@ -1157,7 +1158,7 @@ function useAppController() {
         await saveAccountToLocal(authData.user, password);
         smoothStateUpdate(() => { setCurrentWeight(fullWeight); setUserGoal(goal || 'maintain'); setTargetWeight(finalTargetWeight); });
       }
-    } catch (error: unknown) { Alert.alert('Ошибка регистрации', (error as any)?.message || 'Unknown error'); } finally { setIsLoadingAuth(false); }
+    } catch (error: unknown) { appAlert('Ошибка регистрации', (error as any)?.message || 'Unknown error'); } finally { setIsLoadingAuth(false); }
   };
 
   const sendToAI = async (noteText: string): Promise<boolean> => {
@@ -1165,7 +1166,7 @@ function useAppController() {
     setIsLoading(true);
     try {
       const data = await parseWorkout(noteText, session?.user?.id);
-      if (data?.status === 'limit_reached') { Alert.alert('Лимит разбора', `Разбор тренировок: ${data.limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return false; }
+      if (data?.status === 'limit_reached') { appAlert('Лимит разбора', `Разбор тренировок: ${data.limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return false; }
       const newParsedData = data.parsed_data || [];
 
       const { data: latestWorkouts } = await supabase
@@ -1195,9 +1196,9 @@ function useAppController() {
         const exercisesWithIds: WorkoutData[] = newParsedData.map((ex: any, i: number) => ({ ...ex, id: `manual_${Date.now()}_${i}` }));
         await registerActivityForWeightLoss(exercisesWithIds, true);
       }
-      Alert.alert('Успех', 'Тренировка записана!');
+      appAlert('Успех', 'Тренировка записана!');
       return true;
-    } catch (e: any) { Alert.alert('Ошибка связи', e.message); return false; } finally { setIsLoading(false); }
+    } catch (e: any) { appAlert('Ошибка связи', e.message); return false; } finally { setIsLoading(false); }
   };
 
   // Запись тренировки, собранной из списка упражнений (без ИИ — данные уже структурированы).
@@ -1216,9 +1217,9 @@ function useAppController() {
       }
       loadHistory();
       await registerActivityForWeightLoss(parsed, true);
-      Alert.alert('Успех', 'Тренировка записана!');
+      appAlert('Успех', 'Тренировка записана!');
       return true;
-    } catch (e: any) { Alert.alert('Ошибка', e.message); return false; } finally { setIsLoading(false); }
+    } catch (e: any) { appAlert('Ошибка', e.message); return false; } finally { setIsLoading(false); }
   };
 
   // Клиент пишет «на завтрак..., на обед..., на ужин...» — делим на приёмы, каждый на продукты с КБЖУ.
@@ -1227,7 +1228,7 @@ function useAppController() {
     setIsMealPreviewLoading(true);
     try {
       const data = await parseMeals(text, session?.user?.id);
-      if (data?.status === 'limit_reached') { Alert.alert('Лимит разбора', `Разбор еды: ${data.limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return; }
+      if (data?.status === 'limit_reached') { appAlert('Лимит разбора', `Разбор еды: ${data.limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return; }
       if (!data || data.error || !Array.isArray(data.meals)) throw new Error(data?.error || 'ИИ вернул данные в неверном формате');
       const meals: MealItem[] = data.meals.map((meal: any, mi: number) => {
         const items: FoodItem[] = (meal.items || []).map((it: any) => ({ name: it.name || 'блюдо', calories: it.calories || 0, protein: it.protein || 0, fat: it.fat || 0, carbs: it.carbs || 0 }));
@@ -1238,7 +1239,7 @@ function useAppController() {
       if (mealType && meals.length === 1) meals[0].meal_type = mealType;
       smoothStateUpdate(() => setMealParse(meals));
     } catch (e: any) {
-      Alert.alert('Ошибка', e.message);
+      appAlert('Ошибка', e.message);
     } finally {
       setIsMealPreviewLoading(false);
     }
@@ -1265,7 +1266,7 @@ function useAppController() {
       const confirmed = window.confirm("Удалить этот диалог?");
       if (confirmed) { smoothStateUpdate(() => { setChatSessions(prev => prev.filter(c => c.id !== id)); if (activeChatId === id) setActiveChatId(null); }); }
     } else {
-      Alert.alert("Удаление", "Удалить этот диалог?", [
+      appAlert("Удаление", "Удалить этот диалог?", [
         { text: "Отмена", style: "cancel" },
         { text: "Удалить", style: "destructive", onPress: () => { smoothStateUpdate(() => { setChatSessions(prev => prev.filter(c => c.id !== id)); if (activeChatId === id) setActiveChatId(null); }); }}
       ]);

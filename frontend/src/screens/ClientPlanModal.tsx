@@ -10,6 +10,7 @@ import { parseMeals, notifyUser } from '../api/backend';
 import { groupWorkoutData } from '../utils/workout';
 import { getCurrentDateString } from '../utils/date';
 import { useApp } from '../context/AppContext';
+import { appAlert } from '../components/AppAlert';
 import type { WorkoutData, GroupedWorkout, MealItem, MealLogRow, FoodItem } from '../types';
 
 const PERIODS = [
@@ -98,7 +99,7 @@ export default function ClientPlanModal() {
       { group_id: activeGroup.id, client_id: selectedMember.id, trainer_id: session.user.id, date: nutritionDate, meal_data: meals },
       { onConflict: 'client_id, date' }
     );
-    if (error) Alert.alert('Ошибка', error.message);
+    if (error) appAlert('Ошибка', error.message);
   };
 
   const calcPreview = async () => {
@@ -106,14 +107,14 @@ export default function ClientPlanModal() {
     setMealPreviewLoading(true);
     try {
       const data = await parseMeals(mealInput, session?.user?.id);
-      if (data?.status === 'limit_reached') { Alert.alert('Лимит разбора', `Разбор еды: ${data.limit}/день. Лимит на сегодня исчерпан.`); return; }
+      if (data?.status === 'limit_reached') { appAlert('Лимит разбора', `Разбор еды: ${data.limit}/день. Лимит на сегодня исчерпан.`); return; }
       if (!data || data.error || !Array.isArray(data.meals)) throw new Error(data?.error || 'ИИ вернул данные в неверном формате');
       const items: FoodItem[] = data.meals.flatMap((meal: any) => (meal.items || []).map((it: any) => ({ name: it.name || 'блюдо', calories: it.calories || 0, protein: it.protein || 0, fat: it.fat || 0, carbs: it.carbs || 0 })));
       if (items.length === 0) throw new Error('Не удалось распознать продукты');
       const t = items.reduce((a, i) => ({ c: a.c + i.calories, p: a.p + i.protein, f: a.f + i.fat, cb: a.cb + i.carbs }), { c: 0, p: 0, f: 0, cb: 0 });
       setMealPreview({ id: `meal_${Date.now()}`, meal_type: mealType, name: items.map(i => i.name).join(', '), items, calories: t.c, protein: t.p, fat: t.f, carbs: t.cb, eaten: false });
     } catch (e: any) {
-      Alert.alert('Ошибка', e.message);
+      appAlert('Ошибка', e.message);
     } finally {
       setMealPreviewLoading(false);
     }

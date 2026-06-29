@@ -8,6 +8,7 @@ import { groupWorkoutData } from '../utils/workout';
 import { getCurrentDateString } from '../utils/date';
 import { useApp } from '../context/AppContext';
 import { getBackendUrl } from '../api/backend';
+import { appAlert } from '../components/AppAlert';
 import ClientPlanModal from './ClientPlanModal';
 import type { AssignedWorkout, WorkoutData, GroupMember, GroupedWorkout, Group } from '../types';
 
@@ -51,7 +52,7 @@ export default function ClubScreen() {
           <Text style={styles.groupHeaderTitle} numberOfLines={1}>{activeGroup.name}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <TouchableOpacity onPress={() => shareInvite(activeGroup)} style={{ marginRight: 16 }}><Ionicons name="share-social-outline" size={26} color={COLORS.textPrimary} /></TouchableOpacity>
-            <TouchableOpacity onPress={() => {Alert.alert(isOwner ? "Настройки" : "Клуб", `Код доступа: ${activeGroup.code}`, [{ text: "Поделиться приглашением", onPress: () => shareInvite(activeGroup) }, { text: isOwner ? "Удалить клуб" : "Выйти из клуба", style: "destructive", onPress: () => deleteOrLeaveGroup(activeGroup) }, { text: "Закрыть", style: "cancel" }]);}}><Ionicons name="settings-sharp" size={28} color={COLORS.textPrimary} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => {appAlert(isOwner ? "Настройки" : "Клуб", `Код доступа: ${activeGroup.code}`, [{ text: "Поделиться приглашением", onPress: () => shareInvite(activeGroup) }, { text: isOwner ? "Удалить клуб" : "Выйти из клуба", style: "destructive", onPress: () => deleteOrLeaveGroup(activeGroup) }, { text: "Закрыть", style: "cancel" }]);}}><Ionicons name="settings-sharp" size={28} color={COLORS.textPrimary} /></TouchableOpacity>
           </View>
         </View>
 

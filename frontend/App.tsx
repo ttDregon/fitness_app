@@ -6,6 +6,7 @@ import MainShell from './src/screens/MainShell';
 import { ScreenBackground } from './src/components/Gradient';
 import { BootScreen } from './src/components/BootScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { AppAlertHost } from './src/components/AppAlert';
 import { COLORS } from './src/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -69,6 +70,7 @@ export default function App() {
     <ErrorBoundary>
       <AppProvider>
         <Root />
+        <AppAlertHost />
       </AppProvider>
     </ErrorBoundary>
   );

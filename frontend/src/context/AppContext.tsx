@@ -248,31 +248,36 @@ function useAppController() {
     return () => authListener.subscription.unsubscribe();
   }, []);
 
+  // Грузим историю чатов один раз на пользователя (по user.id, а НЕ по объекту session —
+  // иначе обновление токена меняет session и перечитывает хранилище, затирая свежий чат).
+  const chatsLoadedRef = useRef<string | null>(null);
   useEffect(() => {
-    const loadChatSessions = async () => {
-      if (!session?.user?.id) return;
-      const key = `chatSessions_${session.user.id}`;
+    const uid = session?.user?.id;
+    if (!uid) { chatsLoadedRef.current = null; return; }
+    let cancelled = false;
+    (async () => {
+      const key = `chatSessions_${uid}`;
       try {
-        let saved = Platform.OS !== 'web' ? await AsyncStorage.getItem(key) : typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
-        if (saved) setChatSessions(JSON.parse(saved));
-        else setChatSessions([]);
+        const saved = Platform.OS !== 'web'
+          ? await AsyncStorage.getItem(key)
+          : (typeof window !== 'undefined' ? window.localStorage.getItem(key) : null);
+        if (!cancelled) setChatSessions(saved ? JSON.parse(saved) : []);
       } catch (e) {}
-    };
-    if (session) loadChatSessions();
-  }, [session]);
+      if (!cancelled) chatsLoadedRef.current = uid; // сохранять можно только после загрузки
+    })();
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
 
   useEffect(() => {
-    const saveChatSessions = async () => {
-      if (!session?.user?.id) return;
-      const key = `chatSessions_${session.user.id}`;
-      try {
-        const val = JSON.stringify(chatSessions);
-        if (Platform.OS !== 'web') await AsyncStorage.setItem(key, val);
-        else if (typeof window !== 'undefined') window.localStorage.setItem(key, val);
-      } catch (e) {}
-    };
-    if (session) saveChatSessions();
-  }, [chatSessions, session]);
+    const uid = session?.user?.id;
+    if (!uid || chatsLoadedRef.current !== uid) return; // не затираем хранилище до первой загрузки
+    const key = `chatSessions_${uid}`;
+    try {
+      const val = JSON.stringify(chatSessions);
+      if (Platform.OS !== 'web') AsyncStorage.setItem(key, val);
+      else if (typeof window !== 'undefined') window.localStorage.setItem(key, val);
+    } catch (e) {}
+  }, [chatSessions, session?.user?.id]);
 
   // Пуш: настраиваем поведение в foreground + реагируем на тап по уведомлению (переход на вкладку).
   useEffect(() => {
@@ -785,7 +790,7 @@ function useAppController() {
     if (session?.user?.id === account.id) { setIsAccountSwitcherVisible(false); return; }
     setIsAccountSwitcherVisible(false); setIsSideMenuVisible(false); setIsSwitchingAccount(true);
     setAssignNote(''); setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
-    setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
+    setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
     setTargetWeight(null);
     await supabase.auth.signOut();
     const { data, error } = await supabase.auth.signInWithPassword({ email: account.email, password: account.password });
@@ -808,7 +813,7 @@ function useAppController() {
     smoothStateUpdate(() => {
       setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
       setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
-      setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
+      setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
       setTargetWeight(null);
     });
   };
@@ -822,7 +827,7 @@ function useAppController() {
       setGroups([]); setHistory([]); setActiveGroup(null); setGroupMembers([]); setTodayWorkouts([]); setUpcomingSessions([]);
       setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setIsSideMenuVisible(false); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
       setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
-      setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
+      setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
       setTargetWeight(null);
     });
   };

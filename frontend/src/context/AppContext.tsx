@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
-import { Platform, Alert, Animated, Easing, LayoutAnimation, ScrollView, Linking } from 'react-native';
+import { Platform, Alert, Animated, Easing, LayoutAnimation, ScrollView, Linking, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { getCurrentDateString } from '../utils/date';
@@ -490,6 +490,8 @@ function useAppController() {
   // --- Подписки: производные флаги + действия ---
   const trainerSubActive = !!trainerUntil && new Date(trainerUntil).getTime() > Date.now();
   const aiUnlimited = aiPlan === 'unlim' && !!aiUntil && new Date(aiUntil).getTime() > Date.now();
+  // Любой платный ИИ-план (p50/p150/unlim) ещё активен.
+  const aiSubActive = aiPlan !== 'free' && !!aiUntil && new Date(aiUntil).getTime() > Date.now();
 
   // Гейт тренерских функций: true если можно, иначе показывает paywall и возвращает false.
   const requireTrainerSub = (): boolean => {
@@ -499,10 +501,77 @@ function useAppController() {
   };
   // Открыть оплату в Telegram-боте (он по start-параметру активирует подписку в Supabase).
   const openCheckout = (kind: 'trainer' | 'ai', planId: string) => {
+    // Запоминаем, что начали оплату: когда пользователь вернётся в приложение из Telegram,
+    // подписку проверим автоматически — без ручного «Я оплатил».
+    pendingCheckoutRef.current = { kind, at: Date.now() };
     Linking.openURL(tgCheckoutUrl(kind, planId, session?.user?.id))
       .catch(() => Alert.alert('Telegram', 'Не удалось открыть Telegram. Установлен ли он?'));
   };
   const refreshSubscription = async () => { await fetchUserProfileData(); };
+
+  // Авто-проверка подписки после оплаты в Telegram.
+  // Refs читаем внутри таймеров/слушателей, чтобы не ловить устаревшие значения из замыкания.
+  const pendingCheckoutRef = useRef<{ kind: 'trainer' | 'ai'; at: number } | null>(null);
+  const trainerActiveRef = useRef(false);
+  const aiActiveRef = useRef(false);
+  const refreshRef = useRef(refreshSubscription);
+  useEffect(() => { trainerActiveRef.current = trainerSubActive; }, [trainerSubActive]);
+  useEffect(() => { aiActiveRef.current = aiSubActive; }, [aiSubActive]);
+  useEffect(() => { refreshRef.current = refreshSubscription; });
+
+  // Несколько раз перечитываем профиль, пока подписка нужного типа не станет активной
+  // (запись бота в Supabase может прийти не мгновенно).
+  const pollSubscriptionActivation = (kind: 'trainer' | 'ai') => {
+    const isActive = () => (kind === 'trainer' ? trainerActiveRef.current : aiActiveRef.current);
+    if (isActive()) { pendingCheckoutRef.current = null; return; }
+    let tries = 0;
+    const tick = async () => {
+      await refreshRef.current();
+      tries++;
+      if (isActive()) { pendingCheckoutRef.current = null; return; }
+      if (tries < 5) setTimeout(tick, 2500);
+      // иначе оставляем флаг: при следующем возврате (в пределах окна) попробуем ещё.
+    };
+    tick();
+  };
+
+  // 1) Возврат в приложение после оплаты — авто-проверка без ручного «Я оплатил».
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      const pending = pendingCheckoutRef.current;
+      if (!pending) return;
+      // Окно ожидания оплаты — 30 минут; позже считаем, что пользователь передумал.
+      if (Date.now() - pending.at > 30 * 60 * 1000) { pendingCheckoutRef.current = null; return; }
+      pollSubscriptionActivation(pending.kind);
+    });
+    return () => sub.remove();
+  }, []);
+
+  // 2) Диплинк из Telegram-бота (mysafeapp://paid?kind=trainer|ai) — работает после пересборки
+  //    (схема регистрируется нативно). Открывает приложение и сразу проверяет подписку.
+  useEffect(() => {
+    const handleUrl = (url: string | null) => {
+      if (!url || url.indexOf('paid') === -1) return;
+      pollSubscriptionActivation(/kind=ai/.test(url) ? 'ai' : 'trainer');
+    };
+    Linking.getInitialURL().then(handleUrl).catch(() => {});
+    const sub = Linking.addEventListener('url', (e) => handleUrl(e.url));
+    return () => sub.remove();
+  }, []);
+
+  // Как только подписка стала активной — автоматически закрываем paywall и сообщаем об успехе.
+  useEffect(() => {
+    if (paywall === 'trainer' && trainerSubActive) {
+      setPaywall(null);
+      pendingCheckoutRef.current = null;
+      Alert.alert('Готово', 'Подписка тренера активирована.');
+    } else if (paywall === 'ai' && aiSubActive) {
+      setPaywall(null);
+      pendingCheckoutRef.current = null;
+      Alert.alert('Готово', 'Подписка на ИИ активирована.');
+    }
+  }, [paywall, trainerSubActive, aiSubActive]);
 
   const getLocalWeightKey = () => `weight_logs_${session?.user?.id || 'guest'}`;
 

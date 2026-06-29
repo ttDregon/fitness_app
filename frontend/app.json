@@ -2,6 +2,7 @@
   "expo": {
     "name": "fitness_app",
     "slug": "my-safe-app",
+    "scheme": "mysafeapp",
     "version": "1.0.0",
     "sdkVersion": "51.0.0",
     "orientation": "portrait",

@@ -1,8 +1,8 @@
 // Тарифы и подписки. Деньги принимаются в Telegram-боте (Stars); бот пишет статус
 // подписки в Supabase, приложение его читает и открывает доступ.
 
-// ⚠️ ВПИШИ username своего бота (без @) после того как создашь его.
-export const TG_BOT = 'CHANGE_ME_bot';
+// Username бота оплаты (без @).
+export const TG_BOT = 'Striva_payment_bot';
 
 // Подписка «Тренер» — доступ к роли тренера на период (без автопродления).
 export const TRAINER_PLANS = [

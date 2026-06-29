@@ -125,15 +125,28 @@ def _check_ai(uid: str, kind: str, limit: int):
 # (переходный режим, чтобы не ломать ещё не обновлённые приложения).
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 
+# Supabase подписывает токены асимметрично (ES256) — проверяем их по публичным
+# ключам JWKS проекта. Для старых проектов на симметричном секрете (HS256) — фолбэк.
+_JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else None
+_jwks_client = jwt.PyJWKClient(_JWKS_URL) if _JWKS_URL else None
+
 
 def _verify_uid(authorization):
     if not authorization or not authorization.startswith("Bearer "):
         return None
     token = authorization.split(" ", 1)[1].strip()
     try:
-        payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
+        alg = jwt.get_unverified_header(token).get("alg", "")
+        if alg == "HS256":
+            if not SUPABASE_JWT_SECRET:
+                return None
+            payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
+        else:
+            key = _jwks_client.get_signing_key_from_jwt(token).key
+            payload = jwt.decode(token, key, algorithms=["ES256", "RS256"], audience="authenticated")
         return payload.get("sub")
-    except Exception:
+    except Exception as e:
+        print(f"jwt verify failed: {e}")
         return None
 
 

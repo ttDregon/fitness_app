@@ -5,6 +5,7 @@ import AuthScreen from './src/screens/AuthScreen';
 import MainShell from './src/screens/MainShell';
 import { ScreenBackground } from './src/components/Gradient';
 import { BootScreen } from './src/components/BootScreen';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { COLORS } from './src/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -65,8 +66,10 @@ function Root() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <Root />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <Root />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

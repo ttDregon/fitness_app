@@ -2,7 +2,10 @@ import json
 import logging
 import os
 import re
+import time
 import httpx
+import jwt
+from collections import defaultdict
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.responses import HTMLResponse
@@ -103,6 +106,77 @@ def _check_ai(uid: str, kind: str, limit: int):
         return False, used, exists
     return True, used, exists
 
+# --- АУТЕНТИФИКАЦИЯ И ЗАЩИТА ОТ ЗЛОУПОТРЕБЛЕНИЙ ---
+# JWT-секрет проекта Supabase (Settings → API → JWT Secret). Если ЗАДАН — бэкенд
+# проверяет токен пользователя и берёт user_id ТОЛЬКО из него (тело не доверяется),
+# а запрос без валидного токена отклоняется (401). Если НЕ задан — старое поведение
+# (переходный режим, чтобы не ломать ещё не обновлённые приложения).
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
+
+
+def _verify_uid(authorization):
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
+        return payload.get("sub")
+    except Exception:
+        return None
+
+
+def _auth_uid(authorization, body_uid):
+    """Авторитетный user_id: при включённой проверке — только из валидного токена."""
+    if SUPABASE_JWT_SECRET:
+        uid = _verify_uid(authorization)
+        if not uid:
+            raise HTTPException(status_code=401, detail="Требуется авторизация")
+        return uid
+    return body_uid  # переходный режим: секрет ещё не задан
+
+
+def _is_trainer_of(trainer_id, client_id) -> bool:
+    """trainer_id владеет группой, в которой состоит client_id?"""
+    try:
+        g = supabase.table("groups").select("id").eq("owner_id", trainer_id).execute()
+        gids = [r["id"] for r in (g.data or [])]
+        if not gids:
+            return False
+        m = supabase.table("group_members").select("group_id").eq("user_id", client_id).in_("group_id", gids).execute()
+        return bool(m.data)
+    except Exception:
+        return False
+
+
+# Простой антифлуд в памяти процесса (на инстанс): защита от долбёжки эндпоинтов.
+_RL = defaultdict(list)
+
+
+def _rate_ok(key: str, limit: int = 30, window: int = 60) -> bool:
+    now = time.time()
+    q = _RL[key]
+    while q and q[0] < now - window:
+        q.pop(0)
+    if len(q) >= limit:
+        return False
+    q.append(now)
+    return True
+
+
+def _client_ip(request) -> str:
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _guard_rate(request, authorization, body_uid, bucket):
+    """Вернуть авторитетный uid и проверить рейт-лимит (429 при превышении)."""
+    uid = _auth_uid(authorization, body_uid)
+    if not _rate_ok(f"{bucket}:{uid or _client_ip(request)}"):
+        raise HTTPException(status_code=429, detail="Слишком много запросов, подождите минуту")
+    return uid
+
 # Модели данных для запросов
 class WorkoutNote(BaseModel):
     text: str
@@ -176,10 +250,11 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: st
 
 
 @app.post("/parse")
-async def parse_workout(note: WorkoutNote):
+async def parse_workout(note: WorkoutNote, request: Request, authorization: Optional[str] = Header(default=None)):
     print(f"\n--- ЗАПРОС К DEEPSEEK (ПАРСИНГ ТРЕНИРОВКИ) ---")
+    uid = _guard_rate(request, authorization, note.user_id, "parse")
 
-    ok, used, exists = _check_ai(note.user_id, "workout", AI_FREE_PARSE)
+    ok, used, exists = _check_ai(uid, "workout", AI_FREE_PARSE)
     if not ok:
         return {"status": "limit_reached", "kind": "workout", "limit": AI_FREE_PARSE, "parsed_data": []}
 
@@ -206,8 +281,8 @@ async def parse_workout(note: WorkoutNote):
         
         raw_response = response.choices[0].message.content
         parsed_json = json.loads(raw_response)
-        if note.user_id:
-            _inc_usage(note.user_id, "workout", used, exists)
+        if uid:
+            _inc_usage(uid, "workout", used, exists)
         return {
             "status": "success",
             "parsed_data": parsed_json.get("workouts", [])
@@ -255,9 +330,9 @@ async def parse_meal(data: dict):
 
 
 @app.post("/parse_meals")
-async def parse_meals(data: dict):
+async def parse_meals(data: dict, request: Request, authorization: Optional[str] = Header(default=None)):
     text = data.get("text", "")
-    uid = data.get("user_id")
+    uid = _guard_rate(request, authorization, data.get("user_id"), "meals")
 
     ok, used, exists = _check_ai(uid, "meal", AI_FREE_PARSE)
     if not ok:
@@ -320,13 +395,21 @@ async def calculate_loss(payload: WorkoutLossPayload):
 
 
 @app.post("/notify")
-async def notify(req: NotifyRequest):
+async def notify(req: NotifyRequest, authorization: Optional[str] = Header(default=None)):
     """Отправить пуш-уведомление пользователю через Expo Push API.
 
     Берём все push-токены пользователя из таблицы push_tokens и шлём сообщение.
     Требует, чтобы SUPABASE_KEY на бэкенде имел право читать чужие токены
     (service_role ключ либо соответствующая RLS-политика).
+
+    Защита: при включённой проверке (есть SUPABASE_JWT_SECRET) отправитель должен
+    быть авторизован и иметь право слать получателю — либо это он сам, либо он
+    тренер группы, в которой состоит получатель. Иначе любой мог бы слать фейковые
+    пуши кому угодно.
     """
+    caller = _auth_uid(authorization, None)
+    if SUPABASE_JWT_SECRET and caller != req.to_user_id and not _is_trainer_of(caller, req.to_user_id):
+        raise HTTPException(status_code=403, detail="Нет прав отправлять этому пользователю")
     try:
         res = supabase.table("push_tokens").select("token").eq("user_id", req.to_user_id).execute()
         tokens = [r["token"] for r in (res.data or []) if r.get("token", "").startswith("Expo")]
@@ -356,22 +439,23 @@ async def notify(req: NotifyRequest):
 
 
 @app.post("/chat")
-async def chat_assistant(req: ChatRequest):
+async def chat_assistant(req: ChatRequest, request: Request, authorization: Optional[str] = Header(default=None)):
     print(f"\n--- ЗАПРОС К DEEPSEEK (ЧАТ С ПАМЯТЬЮ) ---")
+    uid = _guard_rate(request, authorization, req.user_id, "chat")
 
     # Лимит ИИ-чата по подписке (free=10/день).
     chat_used, chat_exists = 0, False
-    if req.user_id:
-        limit = _chat_limit(req.user_id)
-        ok, chat_used, chat_exists = _check_ai(req.user_id, "chat", limit)
+    if uid:
+        limit = _chat_limit(uid)
+        ok, chat_used, chat_exists = _check_ai(uid, "chat", limit)
         if not ok:
             return {"limit_reached": True, "kind": "chat", "limit": limit,
                     "reply": "", "calories": 0, "protein": 0, "fat": 0, "carbs": 0}
 
     user_context = ""
-    if req.user_id:
+    if uid:
         try:
-            response = supabase.table("profiles").select("*").eq("id", req.user_id).execute()
+            response = supabase.table("profiles").select("*").eq("id", uid).execute()
             if response.data:
                 profile = response.data[0]
                 
@@ -443,8 +527,8 @@ async def chat_assistant(req: ChatRequest):
         raw_reply = response.choices[0].message.content
         parsed_reply = json.loads(raw_reply)
 
-        if req.user_id:
-            _inc_usage(req.user_id, "chat", chat_used, chat_exists)
+        if uid:
+            _inc_usage(uid, "chat", chat_used, chat_exists)
 
         return {
             "reply": parsed_reply.get("reply", "Ошибка формата"),

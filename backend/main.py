@@ -245,6 +245,33 @@ async def health():
     return {"status": "ok"}
 
 
+# Пригласительная ссылка в клуб. https кликается в любом мессенджере; страница
+# редиректит в приложение (mysafeapp://join?code=...) и показывает код как запасной
+# вариант (ввести вручную через «Вступить по коду»).
+@app.get("/join", response_class=HTMLResponse)
+async def join_club(code: str = ""):
+    code = "".join(ch for ch in code if ch.isdigit())[:6]
+    deeplink = f"mysafeapp://join?code={code}"
+    return f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0; url={deeplink}">
+<title>Приглашение в клуб Striva</title>
+<style>body{{background:#0A0C16;color:#F5F7FF;font-family:-apple-system,Roboto,sans-serif;
+display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;margin:0;padding:24px}}
+.box{{max-width:440px}} h2{{font-size:26px;margin:0 0 6px}}
+.code{{font-size:46px;font-weight:900;letter-spacing:8px;color:#8B5CF6;margin:16px 0}}
+a{{display:inline-block;margin-top:14px;background:#8B5CF6;color:#fff;text-decoration:none;
+font-size:18px;font-weight:800;padding:16px 32px;border-radius:16px}}
+p{{color:#94A0C0;font-size:16px;line-height:1.5}}</style></head>
+<body><div class="box">
+<h2>Приглашение в клуб Striva 💪</h2><p>Код клуба:</p>
+<div class="code">{code}</div>
+<a href="{deeplink}">Открыть в Striva</a>
+<p style="margin-top:22px">Если не открылось автоматически — запусти приложение Striva,
+нажми «Вступить по коду» и введи код выше.</p>
+</div><script>location.href="{deeplink}";</script></body></html>"""
+
+
 # Мост из Telegram обратно в приложение: кнопки Telegram принимают только https,
 # поэтому бот шлёт https://<backend>/open?kind=..., а эта страница редиректит в
 # кастомную схему приложения (mysafeapp://paid). Схема работает после пересборки APK.

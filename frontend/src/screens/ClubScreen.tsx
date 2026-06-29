@@ -7,6 +7,7 @@ import { COLORS, GRADIENTS } from '../theme';
 import { groupWorkoutData } from '../utils/workout';
 import { getCurrentDateString } from '../utils/date';
 import { useApp } from '../context/AppContext';
+import { getBackendUrl } from '../api/backend';
 import ClientPlanModal from './ClientPlanModal';
 import type { AssignedWorkout, WorkoutData, GroupMember, GroupedWorkout, Group } from '../types';
 
@@ -21,11 +22,13 @@ export default function ClubScreen() {
     modalOpacityAnim, modalScaleAnim, closeAnimatedModal, requireTrainerSub,
   } = useApp();
 
-  // Поделиться приглашением в клуб: код + диплинк (откроет приложение после пересборки).
+  // Поделиться приглашением: https-ссылка кликается везде и редиректит в приложение;
+  // плюс сам код — на случай, если приложения ещё нет (ввести вручную).
   const shareInvite = async (group: Group) => {
     try {
+      const link = `${getBackendUrl()}/join?code=${group.code}`;
       await Share.share({
-        message: `Вступай в мой клуб «${group.name}» в Striva 💪\n\nКод клуба: ${group.code}\nСсылка: mysafeapp://join?code=${group.code}\n\nВ приложении Striva нажми «Вступить по коду» и введи код.`,
+        message: `Вступай в мой клуб «${group.name}» в Striva 💪\n\n${link}\n\nИли открой Striva → «Вступить по коду» и введи код: ${group.code}`,
       });
     } catch (e) {}
   };

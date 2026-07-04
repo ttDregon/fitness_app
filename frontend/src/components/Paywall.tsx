@@ -12,7 +12,7 @@ export function Paywall() {
 
   if (!paywall) return null;
   const isTrainer = paywall === 'trainer';
-  const plans: ReadonlyArray<{ id: string; label: string; priceUah: number }> = isTrainer ? TRAINER_PLANS : AI_PLANS;
+  const plans: ReadonlyArray<{ id: string; label: string; priceUsd: number }> = isTrainer ? TRAINER_PLANS : AI_PLANS;
   const grad = isTrainer ? GRADIENTS.rose : GRADIENTS.indigo;
   const accent = isTrainer ? COLORS.rose : COLORS.indigo;
 
@@ -65,7 +65,7 @@ export function Paywall() {
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: COLORS.textPrimary, fontSize: 17, fontWeight: '800' }}>{p.label}</Text>
                 </View>
-                <Text style={{ color: accent, fontSize: 18, fontWeight: '900', marginRight: 10 }}>{p.priceUah} грн</Text>
+                <Text style={{ color: accent, fontSize: 18, fontWeight: '900', marginRight: 10 }}>${p.priceUsd}</Text>
                 <Ionicons name="logo-usd" size={18} color={accent} />
               </TouchableOpacity>
             ))}

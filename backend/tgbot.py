@@ -36,15 +36,15 @@ WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:48] if BOT_TOKE
 
 # ── тарифы (синхронно с frontend/src/config/billing.ts) ──────────────────────
 TRAINER_PLANS = {
-    "m1":  {"label": "Тренер · 1 месяц",   "months": 1,  "uah": 100,  "stars": 190},
-    "m3":  {"label": "Тренер · 3 месяца",  "months": 3,  "uah": 250,  "stars": 470},
-    "m6":  {"label": "Тренер · 6 месяцев", "months": 6,  "uah": 500,  "stars": 940},
-    "m12": {"label": "Тренер · 1 год",     "months": 12, "uah": 1100, "stars": 2080},
+    "m1":  {"label": "Тренер · 1 месяц",   "months": 1,  "usd": 2,  "stars": 190},
+    "m3":  {"label": "Тренер · 3 месяца",  "months": 3,  "usd": 5,  "stars": 470},
+    "m6":  {"label": "Тренер · 6 месяцев", "months": 6,  "usd": 9,  "stars": 855},
+    "m12": {"label": "Тренер · 1 год",     "months": 12, "usd": 16, "stars": 1520},
 }
 AI_PLANS = {
-    "p50":   {"label": "ИИ-чат · 50 вопросов/день",  "uah": 50,  "stars": 95},
-    "p150":  {"label": "ИИ-чат · 150 вопросов/день", "uah": 150, "stars": 285},
-    "unlim": {"label": "ИИ-чат · безлимит",          "uah": 249, "stars": 470},
+    "p50":   {"label": "ИИ-чат · 50 вопросов/день",  "usd": 1, "stars": 95},
+    "p150":  {"label": "ИИ-чат · 150 вопросов/день", "usd": 3, "stars": 285},
+    "unlim": {"label": "ИИ-чат · безлимит",          "usd": 5, "stars": 470},
 }
 
 
@@ -168,10 +168,10 @@ if enabled:
     def _overview():
         lines = ["<b>Тарифы</b>", "", "<b>Роль «Тренер»</b>"]
         for p in TRAINER_PLANS.values():
-            lines.append(f"• {p['label']} — {p['uah']}₴ ({p['stars']} ⭐)")
+            lines.append(f"• {p['label']} — ${p['usd']} ({p['stars']} ⭐)")
         lines += ["", "<b>ИИ-чат</b> (лимит вопросов/день)"]
         for p in AI_PLANS.values():
-            lines.append(f"• {p['label']} — {p['uah']}₴ ({p['stars']} ⭐)")
+            lines.append(f"• {p['label']} — ${p['usd']} ({p['stars']} ⭐)")
         return "\n".join(lines)
 
     async def _notify_admin(text):
@@ -197,7 +197,7 @@ if enabled:
         info = plan_info(kind, plan)
         await message.answer_invoice(
             title=info["label"],
-            description=f"Доступ активируется в приложении сразу после оплаты (ориентир {info['uah']}₴).",
+            description=f"Доступ активируется в приложении сразу после оплаты (ориентир ${info['usd']}).",
             payload=f"{kind}:{plan}:{user_id}",
             currency="XTR",
             prices=[LabeledPrice(label=info["label"], amount=info["stars"])],

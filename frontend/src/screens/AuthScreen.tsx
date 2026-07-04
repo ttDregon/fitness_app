@@ -63,7 +63,7 @@ export default function AuthScreen() {
               <Text style={{ color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }}>{p.label}</Text>
               <Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 3 }}>Выбрать и оплатить после регистрации →</Text>
             </View>
-            <Text style={{ color: COLORS.rose, fontSize: 18, fontWeight: '900' }}>{p.priceUah} грн</Text>
+            <Text style={{ color: COLORS.rose, fontSize: 18, fontWeight: '900' }}>${p.priceUsd}</Text>
           </TouchableOpacity>
         ))}
         <Text style={{ color: COLORS.textMuted, fontSize: 13, textAlign: 'center', marginVertical: 14, lineHeight: 19 }}>

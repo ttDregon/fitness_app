@@ -34,6 +34,11 @@ enabled = bool(BOT_TOKEN and SUPABASE_URL and SUPABASE_KEY)
 WEBHOOK_PATH = "/tg/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:48] if BOT_TOKEN else None
 
+# Куда ведёт кнопка «Скачать»: лендинг с инструкцией установки (он сам тянет ссылку на APK
+# из env APP_DOWNLOAD_URL). Всегда https — Telegram другого в кнопках не принимает.
+DOWNLOAD_PAGE = f"{PUBLIC_URL}/download"
+AI_FREE_CHAT_PER_DAY = 10  # синхронно с frontend/src/config/billing.ts
+
 # ── тарифы (синхронно с frontend/src/config/billing.ts) ──────────────────────
 TRAINER_PLANS = {
     "m1":  {"label": "Тренер · 1 месяц",   "months": 1,  "usd": 2,  "stars": 190},
@@ -134,6 +139,37 @@ def get_payment(charge_id):
     return res.data[0] if res.data else None
 
 
+def link_tg(tg_user_id, user_id):
+    """Связываем Telegram-аккаунт с профилем приложения (best-effort).
+    Нужно, чтобы кнопки «Тарифы» в самом боте могли выставить счёт даже без deep-link из
+    приложения. Если таблицы tg_links ещё нет — молча пропускаем (см. subscriptions.sql)."""
+    try:
+        _sb.table("tg_links").upsert(
+            {"tg_user_id": tg_user_id, "user_id": user_id, "updated_at": _now().isoformat()},
+            on_conflict="tg_user_id",
+        ).execute()
+    except Exception:
+        log.debug("tg_links upsert пропущен", exc_info=True)
+
+
+def resolve_user_id(tg_user_id):
+    """Находим Supabase user_id по Telegram id: сначала tg_links, затем последний платёж.
+    Возвращает None, если пользователь ещё ни разу не связывал аккаунт из приложения."""
+    try:
+        res = _sb.table("tg_links").select("user_id").eq("tg_user_id", tg_user_id).limit(1).execute()
+        if res.data:
+            return res.data[0]["user_id"]
+    except Exception:
+        log.debug("tg_links lookup пропущен", exc_info=True)
+    try:
+        res = _sb.table("payments").select("user_id").eq("tg_user_id", tg_user_id).limit(1).execute()
+        if res.data:
+            return res.data[0]["user_id"]
+    except Exception:
+        log.debug("payments lookup пропущен", exc_info=True)
+    return None
+
+
 def mark_refunded(charge_id):
     _sb.table("payments").update({"status": "refunded"}).eq("telegram_payment_charge_id", charge_id).execute()
 
@@ -148,11 +184,14 @@ if enabled:
     from aiogram.enums import ParseMode
     from aiogram.filters import Command, CommandObject, CommandStart
     from aiogram.types import (
+        CallbackQuery,
         InlineKeyboardButton,
         InlineKeyboardMarkup,
+        KeyboardButton,
         LabeledPrice,
         Message,
         PreCheckoutQuery,
+        ReplyKeyboardMarkup,
         Update,
     )
 
@@ -160,19 +199,81 @@ if enabled:
     dp = Dispatcher()
     router = Router()
 
+    # ── тексты ────────────────────────────────────────────────────────────────
+    WELCOME = (
+        "👋 Привет! Это <b>Striva</b> — умный дневник тела, питания и тренировок.\n\n"
+        "🍎 Пишешь словами что съел — ИИ сам считает КБЖУ\n"
+        "🏋️ Конструктор тренировок и журнал занятий\n"
+        "💧 Вода, вес и прогресс — на одном экране\n"
+        "🤝 Клубы: тренер ведёт клиентов, расписание и задания\n\n"
+        "Личный трекинг — <b>бесплатно</b>. Через этот бот скачивается приложение и "
+        "оформляется подписка (роль «Тренер» и расширенный ИИ-чат).\n\n"
+        "Нажми «⬇️ Установить приложение», а все тарифы — на кнопке 💎."
+    )
+    DOWNLOAD_TEXT = (
+        "⬇️ <b>Установка Striva</b> (Android)\n\n"
+        "1. Нажмите кнопку ниже и скачайте файл <code>.apk</code>\n"
+        "2. Откройте его на телефоне и разрешите установку из этого источника\n"
+        "3. Войдите или зарегистрируйтесь — и всё готово\n\n"
+        "iOS-версия — в разработке."
+    )
+    TARIFFS_TEXT = (
+        "💎 <b>Тарифы</b>\n\n"
+        "<b>Роль «Тренер»</b> — клубы, клиенты, расписание и задания. "
+        "Разовая оплата за период, без автопродления.\n"
+        f"<b>ИИ-чат</b> — снимает дневной лимит вопросов к ИИ-тренеру "
+        f"(бесплатно {AI_FREE_CHAT_PER_DAY}/день).\n\n"
+        "Выберите тариф — оплата в Telegram Stars ⭐:"
+    )
+    HELP_TEXT = (
+        "🆘 <b>Помощь</b>\n\n"
+        "• 💎 <b>Тарифы</b> — оформить подписку (оплата в Telegram Stars).\n"
+        "• ⬇️ <b>Скачать</b> — установить приложение на Android.\n"
+        "• 🏠 <b>О приложении</b> — что такое Striva.\n\n"
+        "После оплаты доступ открывается в приложении автоматически; если нет — "
+        "нажмите «Я оплатил — проверить» внутри приложения.\n\n"
+        "Оплату можно начать и из приложения (кнопка «Оплатить» на тарифе) — "
+        "бот вернёт вас туда уже со счётом."
+    )
+
+    # ── клавиатуры ──────────────────────────────────────────────────────────────
     def _return_kb(kind):
         return InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="🏠 Вернуться в приложение", url=f"{PUBLIC_URL}/open?kind={kind}")
         ]])
 
-    def _overview():
-        lines = ["<b>Тарифы</b>", "", "<b>Роль «Тренер»</b>"]
-        for p in TRAINER_PLANS.values():
-            lines.append(f"• {p['label']} — ${p['usd']} ({p['stars']} ⭐)")
-        lines += ["", "<b>ИИ-чат</b> (лимит вопросов/день)"]
-        for p in AI_PLANS.values():
-            lines.append(f"• {p['label']} — ${p['usd']} ({p['stars']} ⭐)")
-        return "\n".join(lines)
+    def _nav_kb():
+        """Нижнее меню (заменяет обычную клавиатуру) — постоянная навигация по боту."""
+        return ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="💎 Тарифы"), KeyboardButton(text="⬇️ Скачать")],
+                [KeyboardButton(text="🏠 О приложении"), KeyboardButton(text="🆘 Помощь")],
+            ],
+            resize_keyboard=True,
+            is_persistent=True,
+            input_field_placeholder="Выберите раздел…",
+        )
+
+    def _welcome_kb():
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬇️ Установить приложение", url=DOWNLOAD_PAGE)],
+            [InlineKeyboardButton(text="💎 Тарифы", callback_data="menu:tariffs")],
+        ])
+
+    def _download_kb():
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="⬇️ Скачать приложение", url=DOWNLOAD_PAGE)
+        ]])
+
+    def _tariffs_kb():
+        rows = [[InlineKeyboardButton(
+            text=f"🏋️ {p['label']} — ${p['usd']} · {p['stars']}⭐",
+            callback_data=f"buy:trainer:{pid}")] for pid, p in TRAINER_PLANS.items()]
+        rows += [[InlineKeyboardButton(
+            text=f"🤖 {p['label']} — ${p['usd']} · {p['stars']}⭐",
+            callback_data=f"buy:ai:{pid}")] for pid, p in AI_PLANS.items()]
+        rows.append([InlineKeyboardButton(text="⬇️ Установить приложение", url=DOWNLOAD_PAGE)])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
 
     async def _notify_admin(text):
         for admin_id in ADMIN_IDS:
@@ -181,21 +282,10 @@ if enabled:
             except Exception:
                 log.exception("notify admin %s failed", admin_id)
 
-    @router.message(CommandStart())
-    async def on_start(message: "Message", command: "CommandObject"):
-        parsed = parse_start_payload(command.args)
-        if not parsed:
-            await message.answer(
-                "Привет! Оплата подписки открывается прямо из приложения — нажмите кнопку "
-                "оплаты на нужном тарифе, и Telegram вернёт вас сюда уже со счётом.\n\n" + _overview()
-            )
-            return
-        kind, plan, user_id = parsed
-        if not profile_exists(user_id):
-            await message.answer("Профиль не найден. Войдите в приложение и нажмите кнопку оплаты ещё раз.")
-            return
+    async def _send_invoice(chat_id, kind, plan, user_id):
         info = plan_info(kind, plan)
-        await message.answer_invoice(
+        await bot.send_invoice(
+            chat_id=chat_id,
             title=info["label"],
             description=f"Доступ активируется в приложении сразу после оплаты (ориентир ${info['usd']}).",
             payload=f"{kind}:{plan}:{user_id}",
@@ -204,6 +294,77 @@ if enabled:
             provider_token="",
             start_parameter=f"{kind}-{plan}",
         )
+
+    @router.message(CommandStart())
+    async def on_start(message: "Message", command: "CommandObject"):
+        parsed = parse_start_payload(command.args)
+        # Приход из приложения (deep-link с userId) — сразу счёт, как и раньше.
+        if parsed:
+            kind, plan, user_id = parsed
+            if not profile_exists(user_id):
+                await message.answer("Профиль не найден. Войдите в приложение и нажмите кнопку оплаты ещё раз.")
+                return
+            link_tg(message.from_user.id, user_id)  # запоминаем связь для будущих продлений из бота
+            await _send_invoice(message.chat.id, kind, plan, user_id)
+            return
+        # Обычный вход в бота — приветствие + нижнее меню навигации.
+        await message.answer(WELCOME, reply_markup=_welcome_kb())
+        await message.answer("👇 Меню навигации всегда внизу.", reply_markup=_nav_kb())
+
+    # ── навигация (нижнее меню) ──────────────────────────────────────────────
+    @router.message(F.text == "🏠 О приложении")
+    async def nav_about(message: "Message"):
+        await message.answer(WELCOME, reply_markup=_welcome_kb())
+
+    @router.message(F.text.in_({"⬇️ Скачать", "⬇️ Скачать приложение"}))
+    async def nav_download(message: "Message"):
+        await message.answer(DOWNLOAD_TEXT, reply_markup=_download_kb())
+
+    @router.message(F.text == "💎 Тарифы")
+    async def nav_tariffs(message: "Message"):
+        await message.answer(TARIFFS_TEXT, reply_markup=_tariffs_kb())
+
+    @router.message(F.text == "🆘 Помощь")
+    async def nav_help_btn(message: "Message"):
+        await message.answer(HELP_TEXT, reply_markup=_nav_kb())
+
+    @router.message(Command("tariffs"))
+    async def cmd_tariffs(message: "Message"):
+        await message.answer(TARIFFS_TEXT, reply_markup=_tariffs_kb())
+
+    @router.message(Command("download"))
+    async def cmd_download(message: "Message"):
+        await message.answer(DOWNLOAD_TEXT, reply_markup=_download_kb())
+
+    # ── инлайн-кнопки ────────────────────────────────────────────────────────
+    @router.callback_query(F.data == "menu:tariffs")
+    async def cb_tariffs(cb: "CallbackQuery"):
+        await cb.message.answer(TARIFFS_TEXT, reply_markup=_tariffs_kb())
+        await cb.answer()
+
+    @router.callback_query(F.data.startswith("buy:"))
+    async def cb_buy(cb: "CallbackQuery"):
+        try:
+            _, kind, plan = cb.data.split(":", 2)
+        except ValueError:
+            await cb.answer("Неизвестный тариф", show_alert=True)
+            return
+        if not plan_info(kind, plan):
+            await cb.answer("Этот тариф больше недоступен", show_alert=True)
+            return
+        user_id = resolve_user_id(cb.from_user.id)
+        if not user_id:
+            # Аккаунт ещё не связан — счёт выставить некому. Ведём в приложение.
+            await cb.message.answer(
+                "Чтобы оформить подписку, сначала установите приложение и войдите, затем нажмите "
+                "кнопку оплаты внутри приложения — так мы свяжем ваш аккаунт. После первой оплаты "
+                "тарифы можно продлевать прямо здесь.",
+                reply_markup=_download_kb(),
+            )
+            await cb.answer()
+            return
+        await _send_invoice(cb.message.chat.id, kind, plan, user_id)
+        await cb.answer("Счёт отправлен ⬇️")
 
     @router.pre_checkout_query()
     async def on_pre_checkout(query: "PreCheckoutQuery"):
@@ -240,6 +401,7 @@ if enabled:
                 until = grant_ai(user_id, plan)
                 human = f"Подписка ИИ-чата ({plan}) активна до {until:%d.%m.%Y}"
             record_payment(user_id, message.from_user.id, kind, plan, stars, charge_id)
+            link_tg(message.from_user.id, user_id)  # связь на будущее (продления из бота)
         except Exception as exc:
             log.exception("grant failed")
             await _notify_admin(
@@ -276,7 +438,7 @@ if enabled:
 
     @router.message(Command("help"))
     async def on_help(message: "Message"):
-        await message.answer("Бот принимает оплату подписок приложения через Telegram Stars.\n\n" + _overview())
+        await message.answer(HELP_TEXT, reply_markup=_nav_kb())
 
     dp.include_router(router)
 
@@ -286,7 +448,7 @@ if enabled:
             url,
             secret_token=WEBHOOK_SECRET,
             drop_pending_updates=False,
-            allowed_updates=["message", "pre_checkout_query"],
+            allowed_updates=["message", "callback_query", "pre_checkout_query"],
         )
         log.info("Telegram webhook установлен: %s", url)
 

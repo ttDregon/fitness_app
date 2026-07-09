@@ -291,6 +291,44 @@ a{{color:#8B5CF6;font-size:18px;text-decoration:none}}</style></head>
 <script>location.href="{deeplink}";</script></body></html>"""
 
 
+# Лендинг «Скачать приложение». Кнопку сюда шлёт Telegram-бот (в кнопках только https).
+# Прямую ссылку на APK задаём через env APP_DOWNLOAD_URL (Google Drive / GitHub Release / EAS).
+APP_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "").strip()
+
+
+@app.get("/download", response_class=HTMLResponse)
+async def download_app():
+    if APP_DOWNLOAD_URL:
+        cta = f'<a class="btn" href="{APP_DOWNLOAD_URL}">⬇️ Скачать APK</a>'
+        note = "Файл для Android. Откройте его на телефоне и разрешите установку из этого источника."
+    else:
+        cta = '<span class="btn off">Ссылка скоро появится</span>'
+        note = "Ссылка на скачивание готовится — загляните чуть позже 🙌"
+    return f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Скачать Striva</title>
+<style>body{{background:#0A0C16;color:#F5F7FF;font-family:-apple-system,Roboto,sans-serif;
+display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;margin:0;padding:24px}}
+.box{{max-width:460px}} h2{{font-size:26px;margin:0 0 6px}}
+.sub{{color:#94A0C0;font-size:16px;line-height:1.5;margin:0 0 22px}}
+ol{{text-align:left;color:#C7D0E8;font-size:16px;line-height:1.6;margin:0 auto 24px;max-width:360px}}
+.btn{{display:inline-block;background:#8B5CF6;color:#fff;text-decoration:none;
+font-size:18px;font-weight:800;padding:16px 32px;border-radius:16px}}
+.btn.off{{background:#232842;color:#7C87A8;cursor:default}}
+.note{{color:#94A0C0;font-size:14px;line-height:1.5;margin-top:18px}}</style></head>
+<body><div class="box">
+<h2>Striva 💪</h2>
+<p class="sub">Умный дневник тела, питания и тренировок.</p>
+<ol>
+<li>Скачайте файл <code>.apk</code> кнопкой ниже</li>
+<li>Откройте его на телефоне и разрешите установку</li>
+<li>Войдите или зарегистрируйтесь — готово</li>
+</ol>
+{cta}
+<p class="note">{note}</p>
+</div></body></html>"""
+
+
 # Вебхук Telegram-бота оплаты. Telegram шлёт сюда апдейты; подлинность — по секретному
 # заголовку (его задаём в set_webhook). Обработка — в tgbot.py.
 @app.post(tgbot.WEBHOOK_PATH if tgbot.WEBHOOK_PATH else "/tg/webhook")

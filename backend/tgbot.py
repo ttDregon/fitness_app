@@ -34,9 +34,20 @@ enabled = bool(BOT_TOKEN and SUPABASE_URL and SUPABASE_KEY)
 WEBHOOK_PATH = "/tg/webhook"
 WEBHOOK_SECRET = hashlib.sha256(BOT_TOKEN.encode()).hexdigest()[:48] if BOT_TOKEN else None
 
-# Куда ведёт кнопка «Скачать»: лендинг с инструкцией установки (он сам тянет ссылку на APK
-# из env APP_DOWNLOAD_URL). Всегда https — Telegram другого в кнопках не принимает.
-DOWNLOAD_PAGE = f"{PUBLIC_URL}/download"
+# APK отправляем файлом прямо в чат (без ссылок). file_id получаем, когда админ пришлёт
+# .apk боту (см. on_document); env APK_FILE_ID — чтобы файл сохранялся после рестарта сервера.
+APK_FILE_ID = os.getenv("APK_FILE_ID", "").strip()
+_apk_runtime = {"id": APK_FILE_ID}
+
+
+def current_apk_id():
+    return _apk_runtime["id"]
+
+
+def set_apk_id(file_id):
+    _apk_runtime["id"] = file_id
+
+
 AI_FREE_CHAT_PER_DAY = 10  # синхронно с frontend/src/config/billing.ts
 
 # ── тарифы (синхронно с frontend/src/config/billing.ts) ──────────────────────
@@ -208,22 +219,19 @@ if enabled:
         "🤝 Клубы: тренер ведёт клиентов, расписание и задания\n\n"
         "Личный трекинг — <b>бесплатно</b>. Через этот бот скачивается приложение и "
         "оформляется подписка (роль «Тренер» и расширенный ИИ-чат).\n\n"
-        "Нажми «⬇️ Установить приложение», а все тарифы — на кнопке 💎."
+        "Нажми «⬇️ Установить приложение», а тарифы — в меню внизу 💎."
     )
     DOWNLOAD_TEXT = (
-        "⬇️ <b>Установка Striva</b> (Android)\n\n"
-        "1. Нажмите кнопку ниже и скачайте файл <code>.apk</code>\n"
-        "2. Откройте его на телефоне и разрешите установку из этого источника\n"
-        "3. Войдите или зарегистрируйтесь — и всё готово\n\n"
-        "iOS-версия — в разработке."
+        "⬇️ <b>Приложение Striva</b> (Android)\n\n"
+        "Откройте этот файл на телефоне и разрешите установку из этого источника, "
+        "затем войдите или зарегистрируйтесь.\n\niOS-версия — в разработке."
     )
+    NO_APK_TEXT = "Приложение скоро появится здесь — загляните чуть позже 🙌"
     TARIFFS_TEXT = (
         "💎 <b>Тарифы</b>\n\n"
-        "<b>Роль «Тренер»</b> — клубы, клиенты, расписание и задания. "
-        "Разовая оплата за период, без автопродления.\n"
-        f"<b>ИИ-чат</b> — снимает дневной лимит вопросов к ИИ-тренеру "
-        f"(бесплатно {AI_FREE_CHAT_PER_DAY}/день).\n\n"
-        "Выберите тариф — оплата в Telegram Stars ⭐:"
+        "Оплата в Telegram Stars ⭐, разовая за период — без автопродления. "
+        "«Тренер» открывает роль тренера, «ИИ-чат» снимает дневной лимит вопросов к ИИ. "
+        "Выберите тариф:"
     )
     HELP_TEXT = (
         "🆘 <b>Помощь</b>\n\n"
@@ -254,15 +262,10 @@ if enabled:
             input_field_placeholder="Выберите раздел…",
         )
 
-    def _welcome_kb():
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬇️ Установить приложение", url=DOWNLOAD_PAGE)],
-            [InlineKeyboardButton(text="💎 Тарифы", callback_data="menu:tariffs")],
-        ])
-
-    def _download_kb():
+    def _install_kb():
+        # Установка идёт через отправку .apk файлом (callback), а не по ссылке.
         return InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="⬇️ Скачать приложение", url=DOWNLOAD_PAGE)
+            InlineKeyboardButton(text="⬇️ Установить приложение", callback_data="get:apk")
         ]])
 
     def _tariffs_kb():
@@ -272,7 +275,6 @@ if enabled:
         rows += [[InlineKeyboardButton(
             text=f"🤖 {p['label']} — ${p['usd']} · {p['stars']}⭐",
             callback_data=f"buy:ai:{pid}")] for pid, p in AI_PLANS.items()]
-        rows.append([InlineKeyboardButton(text="⬇️ Установить приложение", url=DOWNLOAD_PAGE)])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     async def _notify_admin(text):
@@ -281,6 +283,13 @@ if enabled:
                 await bot.send_message(admin_id, text)
             except Exception:
                 log.exception("notify admin %s failed", admin_id)
+
+    async def _send_apk(message):
+        fid = current_apk_id()
+        if fid:
+            await message.answer_document(fid, caption=DOWNLOAD_TEXT)
+        else:
+            await message.answer(NO_APK_TEXT)
 
     async def _send_invoice(chat_id, kind, plan, user_id):
         info = plan_info(kind, plan)
@@ -308,17 +317,17 @@ if enabled:
             await _send_invoice(message.chat.id, kind, plan, user_id)
             return
         # Обычный вход в бота — приветствие + нижнее меню навигации.
-        await message.answer(WELCOME, reply_markup=_welcome_kb())
+        await message.answer(WELCOME, reply_markup=_install_kb())
         await message.answer("👇 Меню навигации всегда внизу.", reply_markup=_nav_kb())
 
     # ── навигация (нижнее меню) ──────────────────────────────────────────────
     @router.message(F.text == "🏠 О приложении")
     async def nav_about(message: "Message"):
-        await message.answer(WELCOME, reply_markup=_welcome_kb())
+        await message.answer(WELCOME, reply_markup=_install_kb())
 
     @router.message(F.text.in_({"⬇️ Скачать", "⬇️ Скачать приложение"}))
     async def nav_download(message: "Message"):
-        await message.answer(DOWNLOAD_TEXT, reply_markup=_download_kb())
+        await _send_apk(message)
 
     @router.message(F.text == "💎 Тарифы")
     async def nav_tariffs(message: "Message"):
@@ -334,12 +343,25 @@ if enabled:
 
     @router.message(Command("download"))
     async def cmd_download(message: "Message"):
-        await message.answer(DOWNLOAD_TEXT, reply_markup=_download_kb())
+        await _send_apk(message)
+
+    # Админ присылает боту .apk → запоминаем file_id, дальше бот сам раздаёт файл.
+    @router.message(F.document)
+    async def on_document(message: "Message"):
+        if message.from_user.id not in ADMIN_IDS:
+            return
+        fid = message.document.file_id
+        set_apk_id(fid)
+        await message.answer(
+            "APK принят ✅ Теперь бот отправляет его по кнопке «Скачать».\n\n"
+            "Чтобы файл сохранялся после перезапуска сервера, добавь на Render переменную:\n"
+            f"<code>APK_FILE_ID={fid}</code>"
+        )
 
     # ── инлайн-кнопки ────────────────────────────────────────────────────────
-    @router.callback_query(F.data == "menu:tariffs")
-    async def cb_tariffs(cb: "CallbackQuery"):
-        await cb.message.answer(TARIFFS_TEXT, reply_markup=_tariffs_kb())
+    @router.callback_query(F.data == "get:apk")
+    async def cb_get_apk(cb: "CallbackQuery"):
+        await _send_apk(cb.message)
         await cb.answer()
 
     @router.callback_query(F.data.startswith("buy:"))
@@ -359,7 +381,7 @@ if enabled:
                 "Чтобы оформить подписку, сначала установите приложение и войдите, затем нажмите "
                 "кнопку оплаты внутри приложения — так мы свяжем ваш аккаунт. После первой оплаты "
                 "тарифы можно продлевать прямо здесь.",
-                reply_markup=_download_kb(),
+                reply_markup=_install_kb(),
             )
             await cb.answer()
             return

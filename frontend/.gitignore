@@ -38,3 +38,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# signing secrets - never commit
+/secrets
+*.keystore

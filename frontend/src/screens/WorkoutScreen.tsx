@@ -9,7 +9,7 @@ import { useApp } from '../context/AppContext';
 import { appAlert } from '../components/AppAlert';
 import { EXERCISES, EXERCISE_GROUPS } from '../data/exercises';
 import type { ExerciseDef } from '../data/exercises';
-import type { WorkoutRecord, GroupedWorkout, WorkoutData } from '../types';
+import type { WorkoutRecord, GroupedWorkout, WorkoutData, AiWorkoutPlan } from '../types';
 
 interface BSet { id: string; reps: string; weight: string }
 interface BBlock { id: string; exercise: string; sets: BSet[] }
@@ -24,8 +24,21 @@ const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.ge
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 export default function WorkoutScreen() {
-  const { handleTabChange, sendToAI, isLoading, history, addStructuredWorkout } = useApp();
+  const {
+    handleTabChange, sendToAI, isLoading, history, addStructuredWorkout,
+    aiPlans, isGeneratingPlan, generateAiWorkoutPlan, updateAiPlanSet, commitAiWorkoutPlan,
+  } = useApp();
   const [note, setNote] = useState('');
+
+  // --- Генерация ИИ-плана тренировки ---
+  const [planModalVisible, setPlanModalVisible] = useState(false);
+  const [planMuscleGroup, setPlanMuscleGroup] = useState('');
+  const [planPrefs, setPlanPrefs] = useState('');
+  const submitPlanRequest = async () => {
+    if (!planMuscleGroup) { appAlert('Выбери группу мышц', 'Например «Грудь» или «Всё тело».'); return; }
+    const ok = await generateAiWorkoutPlan(planMuscleGroup, planPrefs);
+    if (ok) { setPlanModalVisible(false); setPlanMuscleGroup(''); setPlanPrefs(''); }
+  };
 
   // --- Конструктор тренировки (блоки упражнений с подходами) ---
   const [blocks, setBlocks] = useState<BBlock[]>([]);
@@ -131,6 +144,51 @@ export default function WorkoutScreen() {
         <TextInput style={styles.inputArea} multiline placeholder="Жим 100кг 5 по 5..." placeholderTextColor={COLORS.textSecondary} value={note} onChangeText={setNote} />
         <GradientButton colors={GRADIENTS.amber} style={styles.button} onPress={async () => { const ok = await sendToAI(note); if (ok) setNote(''); }} disabled={isLoading}>{isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Сохранить с помощью ИИ</Text>}</GradientButton>
       </View>
+
+      {/* Сгенерировать план тренировки через ИИ */}
+      <TouchableOpacity onPress={() => setPlanModalVisible(true)} style={[styles.mainActionBtn, { backgroundColor: COLORS.cardAlt, borderWidth: 1, borderColor: 'rgba(139,92,246,0.35)', marginBottom: 20 }]}>
+        <Ionicons name="sparkles" size={22} color={COLORS.indigo} style={{ marginRight: 10 }} />
+        <Text style={[styles.mainActionText, { color: COLORS.textPrimary }]}>Сгенерировать план (ИИ)</Text>
+      </TouchableOpacity>
+
+      {/* Черновики ИИ-планов: план vs факт, чек-лист по подходам */}
+      {aiPlans.map((plan: AiWorkoutPlan) => (
+        <View key={plan.id} style={aiPlanCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+            <Ionicons name="sparkles" size={18} color={COLORS.indigo} style={{ marginRight: 8 }} />
+            <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }} numberOfLines={1}>{plan.plan_name}</Text>
+          </View>
+          <Text style={{ color: COLORS.textMuted, fontSize: 12, marginBottom: 12 }}>{plan.muscle_group}</Text>
+
+          {plan.plan_data.map(ex => (
+            <View key={ex.id} style={{ marginBottom: 14 }}>
+              <Text style={styles.groupExerciseTitle}>{cap(ex.exercise)}</Text>
+              {ex.sets.map((s, i) => (
+                <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
+                  <Text style={{ width: 90, color: COLORS.textSecondary, fontSize: 13, fontWeight: '700' }}>план {s.target_weight}кг×{s.target_reps}</Text>
+                  <TextInput
+                    style={miniInput} keyboardType="numeric" placeholder="факт повт" placeholderTextColor={COLORS.textMuted}
+                    value={s.actual_reps != null ? String(s.actual_reps) : ''}
+                    onChangeText={v => updateAiPlanSet(plan.id, ex.id, s.id, { actualReps: Number(v.replace(/[^0-9]/g, '')) || 0 })}
+                  />
+                  <TextInput
+                    style={miniInput} keyboardType="numeric" placeholder="факт кг" placeholderTextColor={COLORS.textMuted}
+                    value={s.actual_weight != null ? String(s.actual_weight) : ''}
+                    onChangeText={v => updateAiPlanSet(plan.id, ex.id, s.id, { actualWeight: Number(v.replace(/[^0-9.]/g, '')) || 0 })}
+                  />
+                  <TouchableOpacity onPress={() => updateAiPlanSet(plan.id, ex.id, s.id, { completed: !s.completed })} style={{ paddingLeft: 8 }}>
+                    <Ionicons name={s.completed ? 'checkmark-circle' : 'ellipse-outline'} size={26} color={s.completed ? COLORS.emerald : COLORS.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+          ))}
+
+          <GradientButton colors={GRADIENTS.violetIndigo} style={[styles.button, { marginTop: 4 }]} onPress={() => commitAiWorkoutPlan(plan.id)} disabled={isLoading}>
+            {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Добавить в историю</Text>}
+          </GradientButton>
+        </View>
+      ))}
 
       {/* Конструктор: блоки упражнений */}
       {blocks.map(block => (
@@ -253,10 +311,45 @@ export default function WorkoutScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Модалка запроса ИИ-плана: группа мышц + предпочтения */}
+      <Modal visible={planModalVisible} animationType="slide" transparent onRequestClose={() => setPlanModalVisible(false)}>
+        <View style={styles.modalOverlayFull}>
+          <View style={styles.modalContentFull}>
+            <View style={styles.modalHeaderFull}>
+              <Text style={styles.modalTitleFull}>План от ИИ</Text>
+              <TouchableOpacity onPress={() => setPlanModalVisible(false)}><Ionicons name="close-circle" size={36} color={COLORS.textSecondary} /></TouchableOpacity>
+            </View>
+
+            <Text style={[styles.label, { marginTop: 8 }]}>Группа мышц / комплекс</Text>
+            <View style={{ height: 44, marginTop: 4 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {EXERCISE_GROUPS.filter(g => g !== 'Все').map(g => (
+                  <TouchableOpacity key={g} onPress={() => setPlanMuscleGroup(g)} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginRight: 8, backgroundColor: planMuscleGroup === g ? COLORS.indigo : COLORS.cardAlt, borderWidth: 1, borderColor: planMuscleGroup === g ? COLORS.indigo : 'rgba(255,255,255,0.08)' }}>
+                    <Text style={{ color: planMuscleGroup === g ? '#fff' : COLORS.textSecondary, fontWeight: '700', fontSize: 13 }}>{g}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            <Text style={[styles.label, { marginTop: 16 }]}>Предпочтения (необязательно)</Text>
+            <TextInput
+              style={[styles.inputArea, { marginTop: 4 }]} multiline
+              placeholder="Например: нет доступа к штанге, болит колено, хочу упор на трицепс..."
+              placeholderTextColor={COLORS.textSecondary} value={planPrefs} onChangeText={setPlanPrefs}
+            />
+
+            <GradientButton colors={GRADIENTS.violetIndigo} style={[styles.button, { marginTop: 16 }]} onPress={submitPlanRequest} disabled={isGeneratingPlan || !planMuscleGroup}>
+              {isGeneratingPlan ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Сгенерировать</Text>}
+            </GradientButton>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
 
 const miniInput = { width: 64, height: 44, backgroundColor: COLORS.cardAlt, borderRadius: 12, color: COLORS.textPrimary, textAlign: 'center' as const, marginLeft: 8, fontSize: 15, fontWeight: '700' as const, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' };
 const blockCard = { backgroundColor: COLORS.card, borderRadius: 22, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(251,191,36,0.22)' };
+const aiPlanCard = { backgroundColor: COLORS.card, borderRadius: 22, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' };
 const addSetBtn = { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, paddingVertical: 11, borderRadius: 14, backgroundColor: 'rgba(251,191,36,0.12)', borderWidth: 1, borderColor: 'rgba(251,191,36,0.3)', marginTop: 4 };

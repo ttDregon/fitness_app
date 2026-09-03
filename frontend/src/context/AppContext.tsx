@@ -3,14 +3,14 @@ import { Platform, Alert, Animated, Easing, LayoutAnimation, ScrollView, Linking
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { getCurrentDateString } from '../utils/date';
-import { tgCheckoutUrl } from '../config/billing';
-import { parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl, notifyUser } from '../api/backend';
+import { computeNutritionTargets } from '../utils/nutrition';
+import { parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl, notifyUser, generateWorkoutPlan } from '../api/backend';
 import { configureNotificationHandler, registerForPushNotificationsAsync, scheduleLocalReminder, cancelAllScheduled, Notifications } from '../lib/notifications';
 import { appAlert } from '../components/AppAlert';
 import type {
   Session, WorkoutData, SavedAccount, Group, GroupMember, WeightLog,
   WorkoutRecord, AssignedWorkout, TrainingSession, ChatMessage, ChatSession, Macros, MealPreview,
-  MealItem, MealLogRow, FoodItem,
+  MealItem, MealLogRow, FoodItem, AiWorkoutPlan, PlanExercise,
 } from '../types';
 
 function useAppController() {
@@ -59,14 +59,6 @@ function useAppController() {
   const [dailyCalorieNorm, setDailyCalorieNorm] = useState<number>(0);
   const [maintenanceCalories, setMaintenanceCalories] = useState<number>(0); // поддержка (TDEE без коррекции на цель)
 
-  // --- Подписки ---
-  const [trainerUntil, setTrainerUntil] = useState<string | null>(null); // доступ к роли тренера до этой даты
-  const [aiPlan, setAiPlan] = useState<string>('free');
-  const [aiUntil, setAiUntil] = useState<string | null>(null);
-  const [paywall, setPaywall] = useState<null | 'trainer' | 'ai'>(null);
-  // Тариф тренера, выбранный на экране регистрации до создания аккаунта: оплату
-  // открываем, как только появится сессия (нужен userId, чтобы бот знал кого активировать).
-  const [pendingTrainerPlan, setPendingTrainerPlan] = useState<string | null>(null);
   // Код клуба из пригласительной ссылки (mysafeapp://join?code=...): вступаем, как появится сессия.
   const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
   const [dailyMacros, setDailyMacros] = useState<Macros>({ protein: 0, fat: 0, carb: 0 });
@@ -87,6 +79,8 @@ function useAppController() {
   const [isSideMenuVisible, setIsSideMenuVisible] = useState<boolean>(false);
   const [waterIntake, setWaterIntake] = useState<number>(0);
   const [history, setHistory] = useState<WorkoutRecord[]>([]);
+  const [aiPlans, setAiPlans] = useState<AiWorkoutPlan[]>([]);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [activeGroup, setActiveGroup] = useState<Group | null>(null);
@@ -323,7 +317,7 @@ function useAppController() {
     // Ждём ключевые данные (но не дольше 7с), затем снимаем экран загрузки.
     (async () => {
       const tasks = [
-        loadHistory(), fetchGroups(), fetchUpcomingSessions(), fetchUserProfileData(),
+        loadHistory(), loadAiWorkoutPlans(), fetchGroups(), fetchUpcomingSessions(), fetchUserProfileData(),
         fetchWeightLog(), loadTodayNutritionData(), loadClientNutrition(), loadTodayWater(),
       ];
       await Promise.race([
@@ -472,100 +466,24 @@ function useAppController() {
         setCurrentWeight(data.weight || 0);
         setUserGoal(data.goal || 'maintain');
         setTargetWeight(data.target_weight || null);
-        setTrainerUntil(data.trainer_until || null);
-        setAiPlan(data.ai_plan || 'free');
-        setAiUntil(data.ai_until || null);
         if (data.weight && data.height && data.age && data.gender) {
-          let bmr = data.gender === 'male' ? (10 * data.weight) + (6.25 * data.height) - (5 * data.age) + 5 : (10 * data.weight) + (6.25 * data.height) - (5 * data.age) - 161;
-          let mult = 1.2;
-          if (data.workouts_per_week === '1-2') mult = 1.375;
-          else if (data.workouts_per_week === '3-4') mult = 1.55;
-          else if (data.workouts_per_week === '5+') mult = 1.725;
-          let tdee = bmr * mult;
-          setMaintenanceCalories(Math.round(tdee)); // поддержка веса (до коррекции на цель)
-          if (data.goal === 'lose') tdee -= 500;
-          else if (data.goal === 'gain') tdee += 500;
-
-          const cals = Math.round(tdee);
-          setDailyCalorieNorm(cals);
-          setDailyMacros({
-            protein: Math.round((cals * 0.3) / 4),
-            fat: Math.round((cals * 0.3) / 9),
-            carb: Math.round((cals * 0.4) / 4)
+          const t = computeNutritionTargets({
+            weight: data.weight, height: data.height, age: data.age, gender: data.gender,
+            workoutsPerWeek: data.workouts_per_week, goal: data.goal,
           });
+          setMaintenanceCalories(t.maintenanceCalories);
+          setDailyCalorieNorm(t.dailyCalorieNorm);
+          setDailyMacros(t.macros);
         }
       });
     }
   };
 
-  // --- Подписки: производные флаги + действия ---
-  const trainerSubActive = !!trainerUntil && new Date(trainerUntil).getTime() > Date.now();
-  const aiUnlimited = aiPlan === 'unlim' && !!aiUntil && new Date(aiUntil).getTime() > Date.now();
-  // Любой платный ИИ-план (p50/p150/unlim) ещё активен.
-  const aiSubActive = aiPlan !== 'free' && !!aiUntil && new Date(aiUntil).getTime() > Date.now();
-
-  // Гейт тренерских функций: true если можно, иначе показывает paywall и возвращает false.
-  const requireTrainerSub = (): boolean => {
-    if (trainerSubActive) return true;
-    setPaywall('trainer');
-    return false;
-  };
-  // Открыть оплату в Telegram-боте (он по start-параметру активирует подписку в Supabase).
-  const openCheckout = (kind: 'trainer' | 'ai', planId: string) => {
-    // Запоминаем, что начали оплату: когда пользователь вернётся в приложение из Telegram,
-    // подписку проверим автоматически — без ручного «Я оплатил».
-    pendingCheckoutRef.current = { kind, at: Date.now() };
-    Linking.openURL(tgCheckoutUrl(kind, planId, session?.user?.id))
-      .catch(() => appAlert('Telegram', 'Не удалось открыть Telegram. Установлен ли он?'));
-  };
-  const refreshSubscription = async () => { await fetchUserProfileData(); };
-
-  // Авто-проверка подписки после оплаты в Telegram.
-  // Refs читаем внутри таймеров/слушателей, чтобы не ловить устаревшие значения из замыкания.
-  const pendingCheckoutRef = useRef<{ kind: 'trainer' | 'ai'; at: number } | null>(null);
-  const trainerActiveRef = useRef(false);
-  const aiActiveRef = useRef(false);
-  const refreshRef = useRef(refreshSubscription);
-  useEffect(() => { trainerActiveRef.current = trainerSubActive; }, [trainerSubActive]);
-  useEffect(() => { aiActiveRef.current = aiSubActive; }, [aiSubActive]);
-  useEffect(() => { refreshRef.current = refreshSubscription; });
-
-  // Несколько раз перечитываем профиль, пока подписка нужного типа не станет активной
-  // (запись бота в Supabase может прийти не мгновенно).
-  const pollSubscriptionActivation = (kind: 'trainer' | 'ai') => {
-    const isActive = () => (kind === 'trainer' ? trainerActiveRef.current : aiActiveRef.current);
-    if (isActive()) { pendingCheckoutRef.current = null; return; }
-    let tries = 0;
-    const tick = async () => {
-      await refreshRef.current();
-      tries++;
-      if (isActive()) { pendingCheckoutRef.current = null; return; }
-      if (tries < 5) setTimeout(tick, 2500);
-      // иначе оставляем флаг: при следующем возврате (в пределах окна) попробуем ещё.
-    };
-    tick();
-  };
-
-  // 1) Возврат в приложение после оплаты — авто-проверка без ручного «Я оплатил».
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') return;
-      const pending = pendingCheckoutRef.current;
-      if (!pending) return;
-      // Окно ожидания оплаты — 30 минут; позже считаем, что пользователь передумал.
-      if (Date.now() - pending.at > 30 * 60 * 1000) { pendingCheckoutRef.current = null; return; }
-      pollSubscriptionActivation(pending.kind);
-    });
-    return () => sub.remove();
-  }, []);
-
-  // 2) Диплинки приложения (mysafeapp://...) — работают после пересборки (схема нативная):
-  //    paid?kind=...  — возврат из Telegram-бота → проверяем подписку;
-  //    join?code=...  — приглашение в клуб → вступаем (после входа, если ещё не залогинен).
+  // Диплинк приглашения в клуб (mysafeapp://join?code=...) — вступаем, как появится сессия
+  // (после входа, если ещё не залогинен). Работает после пересборки (схема нативная).
   useEffect(() => {
     const handleUrl = (url: string | null) => {
       if (!url) return;
-      if (url.indexOf('paid') !== -1) { pollSubscriptionActivation(/kind=ai/.test(url) ? 'ai' : 'trainer'); return; }
       const m = url.match(/[?&]code=(\d{4,8})/);
       if (url.indexOf('join') !== -1 && m) setPendingInviteCode(m[1]);
     };
@@ -573,29 +491,6 @@ function useAppController() {
     const sub = Linking.addEventListener('url', (e) => handleUrl(e.url));
     return () => sub.remove();
   }, []);
-
-  // Тренер выбрал тариф при регистрации → после создания аккаунта (сессия готова)
-  // открываем оплату выбранного тарифа в Telegram.
-  useEffect(() => {
-    if (session?.user?.id && pendingTrainerPlan) {
-      const plan = pendingTrainerPlan;
-      setPendingTrainerPlan(null);
-      openCheckout('trainer', plan);
-    }
-  }, [session, pendingTrainerPlan]);
-
-  // Как только подписка стала активной — автоматически закрываем paywall и сообщаем об успехе.
-  useEffect(() => {
-    if (paywall === 'trainer' && trainerSubActive) {
-      setPaywall(null);
-      pendingCheckoutRef.current = null;
-      appAlert('Готово', 'Подписка тренера активирована.');
-    } else if (paywall === 'ai' && aiSubActive) {
-      setPaywall(null);
-      pendingCheckoutRef.current = null;
-      appAlert('Готово', 'Подписка на ИИ активирована.');
-    }
-  }, [paywall, trainerSubActive, aiSubActive]);
 
   const getLocalWeightKey = () => `weight_logs_${session?.user?.id || 'guest'}`;
 
@@ -750,14 +645,10 @@ function useAppController() {
       // профиль → текущий вес + поддержка (TDEE)
       const { data: prof } = await supabase.from('profiles').select('weight, height, age, gender, workouts_per_week').eq('id', uid).single();
       if (!prof?.weight || !prof.height || !prof.age || !prof.gender) { await writeKV(settleKey, today); return; }
-      const bmr = prof.gender === 'male'
-        ? 10 * prof.weight + 6.25 * prof.height - 5 * prof.age + 5
-        : 10 * prof.weight + 6.25 * prof.height - 5 * prof.age - 161;
-      let mult = 1.2;
-      if (prof.workouts_per_week === '1-2') mult = 1.375;
-      else if (prof.workouts_per_week === '3-4') mult = 1.55;
-      else if (prof.workouts_per_week === '5+') mult = 1.725;
-      const maintenance = bmr * mult;
+      const { maintenanceCalories: maintenance } = computeNutritionTargets({
+        weight: prof.weight, height: prof.height, age: prof.age, gender: prof.gender,
+        workoutsPerWeek: prof.workouts_per_week,
+      });
 
       // съедено вчера (из локального хранилища питания)
       let consumed = 0;
@@ -841,6 +732,81 @@ function useAppController() {
   const loadHistory = async () => {
     const { data, error } = await supabase.from('workouts').select('*').eq('user_id', session?.user?.id).order('created_at', { ascending: false });
     if (!error && data) setHistory(data as WorkoutRecord[]);
+  };
+
+  // --- ИИ-планы тренировок (черновики "план vs факт" до коммита в личный журнал) ---
+  const loadAiWorkoutPlans = async () => {
+    const { data, error } = await supabase.from('ai_workout_plans').select('*').eq('user_id', session?.user?.id).order('created_at', { ascending: false });
+    if (!error && data) setAiPlans(data as AiWorkoutPlan[]);
+  };
+
+  const generateAiWorkoutPlan = async (muscleGroup: string, preferences: string): Promise<boolean> => {
+    if (!muscleGroup.trim()) return false;
+    setIsGeneratingPlan(true);
+    try {
+      const res = await generateWorkoutPlan(muscleGroup, preferences, session?.user?.id);
+      if (res?.status === 'limit_reached') { appAlert('Лимит', `Генерация планов: ${res.limit}/день. Лимит на сегодня исчерпан.`); return false; }
+      if (!res?.plan || !Array.isArray(res.plan.exercises)) throw new Error('ИИ вернул данные в неверном формате');
+      const exercises: PlanExercise[] = res.plan.exercises.map((ex: any, i: number) => ({
+        id: `ex_${Date.now()}_${i}`,
+        exercise: ex.exercise,
+        sets: (ex.sets || []).map((s: any, j: number) => ({
+          id: `set_${Date.now()}_${i}_${j}`, target_reps: s.target_reps, target_weight: s.target_weight, completed: false,
+        })),
+      }));
+      const row = {
+        user_id: session?.user?.id, date: getCurrentDateString(), muscle_group: muscleGroup,
+        plan_name: res.plan.plan_name || muscleGroup, preferences, plan_data: exercises,
+      };
+      const { data, error } = await supabase.from('ai_workout_plans').insert([row]).select();
+      if (error) throw error;
+      smoothStateUpdate(() => setAiPlans(prev => [...(data as AiWorkoutPlan[]), ...prev]));
+      return true;
+    } catch (e: any) {
+      appAlert('Ошибка', e.message || 'Не удалось сгенерировать план');
+      return false;
+    } finally {
+      setIsGeneratingPlan(false);
+    }
+  };
+
+  // Правка факта по одному подходу (актуальные повторы/вес, отметка выполнения) — черновик,
+  // персистится сразу, чтобы пережить перезапуск приложения посреди тренировки.
+  const updateAiPlanSet = async (
+    planId: string, exerciseId: string, setId: string,
+    updates: { actualReps?: number; actualWeight?: number; completed?: boolean }
+  ) => {
+    const plan = aiPlans.find(p => p.id === planId);
+    if (!plan) return;
+    const newData: PlanExercise[] = plan.plan_data.map(ex => ex.id !== exerciseId ? ex : {
+      ...ex,
+      sets: ex.sets.map(s => s.id !== setId ? s : {
+        ...s,
+        actual_reps: updates.actualReps ?? s.actual_reps,
+        actual_weight: updates.actualWeight ?? s.actual_weight,
+        completed: updates.completed ?? s.completed,
+      }),
+    });
+    smoothStateUpdate(() => setAiPlans(prev => prev.map(p => p.id === planId ? { ...p, plan_data: newData } : p)));
+    await supabase.from('ai_workout_plans').update({ plan_data: newData }).eq('id', planId);
+  };
+
+  // Коммит черновика в личный журнал: по каждому сету берём факт (если отредактирован),
+  // иначе план — тем же путём, что и ручной конструктор (addStructuredWorkout), поэтому
+  // запись сразу попадает в «Историю по дням» и статистику. Черновик после этого удаляется.
+  const commitAiWorkoutPlan = async (planId: string): Promise<boolean> => {
+    const plan = aiPlans.find(p => p.id === planId);
+    if (!plan) return false;
+    const items = plan.plan_data.flatMap(ex => ex.sets.map(s => ({
+      exercise: ex.exercise,
+      weight: s.actual_weight ?? s.target_weight,
+      reps: s.actual_reps ?? s.target_reps,
+    })));
+    const ok = await addStructuredWorkout(items);
+    if (!ok) return false;
+    await supabase.from('ai_workout_plans').delete().eq('id', planId);
+    smoothStateUpdate(() => setAiPlans(prev => prev.filter(p => p.id !== planId)));
+    return true;
   };
 
   const fetchGroups = async () => {
@@ -953,7 +919,6 @@ function useAppController() {
   };
 
   const saveTrainingSession = async () => {
-    if (!requireTrainerSub()) return;
     if (!schedDate || !schedTime || !schedSelectedMember) return;
     const { error } = await supabase.from('training_sessions').insert([{ group_id: schedSelectedGroup?.id, client_id: schedSelectedMember.id, trainer_id: session?.user?.id, session_date: schedDate, session_time: schedTime }]);
     if (error) appAlert("Ошибка", error.message);
@@ -1010,7 +975,6 @@ function useAppController() {
   };
 
   const assignWorkoutToMember = async () => {
-    if (!requireTrainerSub()) return;
     if (!assignNote) return;
     setIsLoading(true);
     try {
@@ -1043,7 +1007,6 @@ function useAppController() {
   };
 
   const createGroup = async () => {
-    if (!requireTrainerSub()) return;
     if (!newGroupName.trim()) return;
     const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
     const { data, error } = await supabase.from('groups').insert([{ name: newGroupName, code: randomCode, owner_id: session?.user?.id }]).select();
@@ -1293,11 +1256,10 @@ function useAppController() {
     const apiMessages = updatedMessages.map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text }));
 
     try {
-      const data = await sendChat(apiMessages, session?.user?.id);
+      const data = await sendChat(apiMessages, session?.user?.id, dailyCalorieNorm, dailyMacros);
       if (data?.limit_reached) {
-        const lm: ChatMessage = { id: (Date.now() + 1).toString(), text: `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Оформи подписку, чтобы продолжить.`, sender: 'ai' };
+        const lm: ChatMessage = { id: (Date.now() + 1).toString(), text: `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Лимит обновится завтра.`, sender: 'ai' };
         smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, lm], updatedAt: Date.now() } : c)));
-        setPaywall('ai');
         return;
       }
 
@@ -1337,11 +1299,10 @@ function useAppController() {
     const apiMessages = newSessionContent.messages.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text }));
 
     try {
-      const data = await sendChat(apiMessages, session?.user?.id);
+      const data = await sendChat(apiMessages, session?.user?.id, dailyCalorieNorm, dailyMacros);
       if (data?.limit_reached) {
-        const lm: ChatMessage = { id: (Date.now() + 1).toString(), text: `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Оформи подписку, чтобы продолжить.`, sender: 'ai' };
+        const lm: ChatMessage = { id: (Date.now() + 1).toString(), text: `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Лимит обновится завтра.`, sender: 'ai' };
         smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, lm], updatedAt: Date.now() } : c)));
-        setPaywall('ai');
         return;
       }
 
@@ -1572,9 +1533,6 @@ function useAppController() {
 
     // nutrition
     dailyCalorieNorm, maintenanceCalories, dailyMacros, consumedCalories, consumedMacros,
-    // подписки
-    paywall, setPaywall, trainerSubActive, aiUnlimited, requireTrainerSub, openCheckout, refreshSubscription,
-    setPendingTrainerPlan,
     isMealModalVisible, setIsMealModalVisible,
     isMealPreviewLoading, mealParse, setMealParse,
     calcClientMeals, confirmClientMeals,
@@ -1582,6 +1540,7 @@ function useAppController() {
 
     // workout journal
     history, sendToAI, addStructuredWorkout,
+    aiPlans, isGeneratingPlan, generateAiWorkoutPlan, updateAiPlanSet, commitAiWorkoutPlan,
 
     // groups / clubs
     groups, activeGroup, setActiveGroup, groupMembers, setGroupMembers, todayWorkouts, setTodayWorkouts,

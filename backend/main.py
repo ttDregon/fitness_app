@@ -66,8 +66,9 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- ЛИМИТЫ ИИ (считаются на сервере, нельзя обойти из приложения) ---
-AI_FREE_PARSE = 10          # разбор еды и тренировок: 10/день каждый, всегда
-CHAT_LIMITS = {"free": 10, "p50": 50, "p150": 150, "unlim": -1}  # -1 = безлимит
+# Приложение бесплатное для всех — лимиты только чтобы не улететь по счёту за API.
+AI_FREE_CHAT = 30           # чат: 30 сообщений/день
+AI_FREE_PARSE = 15          # разбор еды и тренировок: 15/день каждый, всегда
 
 def _today():
     return datetime.now(timezone.utc).date().isoformat()
@@ -77,19 +78,6 @@ def _parse_dt(s):
         return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
     except Exception:
         return None
-
-def _chat_limit(uid: str) -> int:
-    """Лимит ИИ-чата по активной подписке (иначе free=10)."""
-    try:
-        res = supabase.table("profiles").select("ai_plan, ai_until").eq("id", uid).maybe_single().execute()
-        row = res.data or {}
-        plan = row.get("ai_plan") or "free"
-        until = _parse_dt(row.get("ai_until"))
-        if not until or until <= datetime.now(timezone.utc):
-            plan = "free"
-        return CHAT_LIMITS.get(plan, 10)
-    except Exception:
-        return 10
 
 def _usage(uid: str, kind: str):
     """Возвращает (использовано_сегодня, есть_ли_строка)."""
@@ -219,6 +207,8 @@ class ChatMessageItem(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessageItem]  # История сообщений
     user_id: Optional[str] = None
+    daily_calorie_norm: Optional[int] = None  # уже посчитанная норма (см. frontend/src/utils/nutrition.ts)
+    daily_macros: Optional[dict] = None       # {protein, fat, carb}
 
 class WorkoutLossPayload(BaseModel):
     weight: float
@@ -229,6 +219,11 @@ class NotifyRequest(BaseModel):
     title: str
     body: str
     data: Optional[dict] = None
+
+class WorkoutPlanRequest(BaseModel):
+    muscle_group: str            # напр. "Грудь", "Спина", "Ноги", "Всё тело"
+    preferences: Optional[str] = ""   # свободный текст: ограничения, инвентарь и т.п.
+    user_id: Optional[str] = None
 
 
 # Лёгкие health-роуты: ничего не вызывают (ни DeepSeek, ни Supabase), отвечают мгновенно.
@@ -346,42 +341,101 @@ async def parse_workout(note: WorkoutNote, request: Request, authorization: Opti
         raise HTTPException(status_code=500, detail="Ошибка обработки запроса")
 
 
-@app.post("/parse_meal")
-async def parse_meal(data: dict, request: Request, authorization: Optional[str] = Header(default=None)):
-    _guard_rate(request, authorization, data.get("user_id"), "parse_meal")
-    text = data.get("text", "")
+def _summarize_workout_history(uid: str, muscle_group: str) -> str:
+    """Короткая сводка последних тренировок для этой группы мышц: план vs факт,
+    чтобы ИИ мог придержать/снизить нагрузку при недовыполнении и прогрессировать
+    при полном выполнении. Читает и личный журнал (workouts), и черновики
+    ИИ-планов (ai_workout_plans) — вторые несут факт по сетам, первый только итог."""
+    lines = []
+    try:
+        plans = supabase.table("ai_workout_plans").select("*") \
+            .eq("user_id", uid).eq("muscle_group", muscle_group) \
+            .order("created_at", desc=True).limit(3).execute()
+        for row in (plans.data or []):
+            for ex in (row.get("plan_data") or []):
+                parts = []
+                for s in ex.get("sets", []):
+                    tgt = f"{s.get('target_weight')}кг×{s.get('target_reps')}"
+                    if s.get("actual_reps") is not None or s.get("actual_weight") is not None:
+                        fact = f"{s.get('actual_weight', s.get('target_weight'))}кг×{s.get('actual_reps', s.get('target_reps'))}"
+                        parts.append(f"план {tgt}, факт {fact}" + ("" if s.get("completed") else " (не завершено)"))
+                    else:
+                        parts.append(f"план {tgt} (не отмечено)")
+                if parts:
+                    lines.append(f"- {row.get('date')}: {ex.get('exercise')} — " + "; ".join(parts))
+    except Exception:
+        pass
+    if not lines:
+        return "Истории тренировок для этой группы мышц пока нет — предложи щадящую стартовую нагрузку."
+    return "ПОСЛЕДНИЕ ТРЕНИРОВКИ (план vs факт):\n" + "\n".join(lines)
+
+
+@app.post("/generate_workout_plan")
+async def generate_workout_plan(req: WorkoutPlanRequest, request: Request, authorization: Optional[str] = Header(default=None)):
+    print(f"\n--- ЗАПРОС К DEEPSEEK (ГЕНЕРАЦИЯ ПЛАНА ТРЕНИРОВКИ) ---")
+    uid = _guard_rate(request, authorization, req.user_id, "workout_plan")
+
+    ok, used, exists = _check_ai(uid, "plan", AI_FREE_PARSE)
+    if not ok:
+        return {"status": "limit_reached", "kind": "plan", "limit": AI_FREE_PARSE}
+
+    history_summary = _summarize_workout_history(uid, req.muscle_group) if uid else ""
 
     prompt = f"""
-    Проанализируй блюдо: "{text}".
-    Верни ТОЛЬКО валидный JSON без текста, комментариев и форматирования markdown.
-    Формат строго такой:
+    Составь тренировку для группы мышц/комплекса: "{req.muscle_group}".
+    Предпочтения и ограничения пользователя: "{req.preferences or 'нет особых пожеланий'}".
+
+    {history_summary}
+
+    Правила:
+    - Подбери 4-6 упражнений, подходящих группе мышц и предпочтениям.
+    - Если в истории есть недовыполнение (факт меньше плана или "не завершено") — не увеличивай
+      вес/повторы для этого упражнения, при сильном недовыполнении немного снизь нагрузку.
+    - Если прошлая тренировка выполнена полностью — умеренно прогрессируй (+2.5-5кг веса или +1 повтор).
+    - Для каждого упражнения укажи от 3 до 5 подходов с целевым весом (кг) и повторениями.
+
+    Верни ТОЛЬКО валидный JSON без markdown и комментариев, строго такой формат:
     {{
-      "name": "Название (коротко)",
-      "calories": 100,
-      "protein": 10,
-      "fat": 5,
-      "carbs": 20
+      "plan_name": "Короткое название плана",
+      "exercises": [
+        {{ "exercise": "Название упражнения", "sets": [ {{ "target_reps": 8, "target_weight": 40 }} ] }}
+      ]
     }}
     """
-    
+
     try:
         response = client.chat.completions.create(
             model="deepseek-chat",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=200,
-            temperature=0.1
+            messages=[
+                {"role": "system", "content": "You output valid JSON only."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.4
         )
-        
-        raw_reply = response.choices[0].message.content
-        
-        # Очищаем ответ от маркдауна, если ИИ всё же его добавил
-        cleaned_reply = re.sub(r'```json|```', '', raw_reply).strip()
-        
-        parsed_json = json.loads(cleaned_reply)
-        return parsed_json
-        
+        raw = response.choices[0].message.content
+        cleaned = re.sub(r'```json|```', '', raw).strip()
+        parsed = json.loads(cleaned)
+        if uid:
+            _inc_usage(uid, "plan", used, exists)
+        return {"status": "success", "plan": parsed}
     except Exception as e:
-        return {"error": str(e)}
+        print(f"❌ Ошибка генерации плана: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка обработки запроса")
+
+
+def _clamp_food_item(it: dict) -> dict:
+    """Подстраховка от галлюцинаций ИИ: разумные пределы на один продукт + сверка,
+    что calories примерно сходится с 4*protein + 9*fat + 4*carbs (иначе пересчитываем)."""
+    cal = max(0, min(float(it.get("calories") or 0), 3000))
+    p = max(0, min(float(it.get("protein") or 0), 300))
+    f = max(0, min(float(it.get("fat") or 0), 300))
+    c = max(0, min(float(it.get("carbs") or 0), 500))
+    derived = 4 * p + 9 * f + 4 * c
+    if derived > 0 and (cal == 0 or abs(derived - cal) / max(derived, cal) > 0.25):
+        cal = derived
+    it["calories"], it["protein"], it["fat"], it["carbs"] = round(cal), round(p), round(f), round(c)
+    return it
 
 
 @app.post("/parse_meals")
@@ -429,9 +483,12 @@ async def parse_meals(data: dict, request: Request, authorization: Optional[str]
         raw = response.choices[0].message.content
         cleaned = re.sub(r'```json|```', '', raw).strip()
         parsed = json.loads(cleaned)
+        meals = parsed.get("meals", [])
+        for meal in meals:
+            meal["items"] = [_clamp_food_item(it) for it in meal.get("items", [])]
         if uid:
             _inc_usage(uid, "meal", used, exists)
-        return {"meals": parsed.get("meals", [])}
+        return {"meals": meals}
     except Exception as e:
         return {"error": str(e)}
 
@@ -502,13 +559,12 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
     print(f"\n--- ЗАПРОС К DEEPSEEK (ЧАТ С ПАМЯТЬЮ) ---")
     uid = _guard_rate(request, authorization, req.user_id, "chat")
 
-    # Лимит ИИ-чата по подписке (free=10/день).
+    # Дневной лимит ИИ-чата (одинаковый для всех — оплаты в приложении нет).
     chat_used, chat_exists = 0, False
     if uid:
-        limit = _chat_limit(uid)
-        ok, chat_used, chat_exists = _check_ai(uid, "chat", limit)
+        ok, chat_used, chat_exists = _check_ai(uid, "chat", AI_FREE_CHAT)
         if not ok:
-            return {"limit_reached": True, "kind": "chat", "limit": limit,
+            return {"limit_reached": True, "kind": "chat", "limit": AI_FREE_CHAT,
                     "reply": "", "calories": 0, "protein": 0, "fat": 0, "carbs": 0}
 
     user_context = ""
@@ -517,16 +573,24 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
             response = supabase.table("profiles").select("*").eq("id", uid).execute()
             if response.data:
                 profile = response.data[0]
-                
+
                 name = profile.get("name", "Пользователь")
                 goal_raw = profile.get("goal", "")
                 goal = "Похудение" if goal_raw == "lose" else "Набор массы" if goal_raw == "gain" else "Поддержание веса"
+                weight, height, age, gender = profile.get("weight"), profile.get("height"), profile.get("age"), profile.get("gender")
 
                 user_context = f"""
 ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ:
 - Имя: {name}
 - Цель: {goal}
 """
+                if weight and height and age and gender:
+                    user_context += f"- Вес: {weight} кг, рост: {height} см, возраст: {age}, пол: {gender}\n"
+                if req.daily_calorie_norm:
+                    user_context += f"- Дневная норма калорий: {req.daily_calorie_norm} ккал\n"
+                if req.daily_macros:
+                    m = req.daily_macros
+                    user_context += f"- Дневная норма БЖУ: белки {m.get('protein')}г, жиры {m.get('fat')}г, углеводы {m.get('carb')}г\n"
         except Exception as db_err:
             pass
 
@@ -564,6 +628,8 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
     - Если should_log_meal: false, оставь все нутриенты равными 0.
 
     ПРАВИЛО 3: Если вопрос НЕ относится к спорту или питанию, в "reply" напиши "К сожалению я не могу вам с этим помочь", а should_log_meal: false and нутриенты 0.
+
+    ПРАВИЛО 4 (ГРУНТУЙ СОВЕТЫ В ЦИФРАХ ПОЛЬЗОВАТЕЛЯ): Если в ИНФОРМАЦИИ О ПОЛЬЗОВАТЕЛЕ указаны дневная норма калорий и БЖУ — любые твои рекомендации по количеству белка/жиров/углеводов/калорий должны опираться ИМЕННО на эти цифры (например "тебе на сегодня нужно ~150г белка"), а не придумываться заново. Никогда не называй суточную норму белка выше нормы из контекста.
     """
     
     api_messages = [{"role": "system", "content": system_prompt}]

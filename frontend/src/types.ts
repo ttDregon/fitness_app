@@ -20,3 +20,8 @@ export interface FoodItem { name: string; calories: number; protein: number; fat
 export interface MealItem { id: string; meal_type?: string; name: string; items?: FoodItem[]; calories: number; protein: number; fat: number; carbs: number; eaten?: boolean; }
 export interface AssignedMeal { id?: string; group_id: string; client_id: string; trainer_id: string; date: string; meal_data: MealItem[]; }
 export interface MealLogRow { id: string; user_id: string; date: string; name: string; meal_type?: string; items?: FoodItem[]; calories: number; protein: number; fat: number; carbs: number; source: string; }
+
+// ИИ-план тренировки (черновик "план vs факт" до коммита в WorkoutData/workouts).
+export interface PlanSet { id: string; target_reps: number; target_weight: number; actual_reps?: number; actual_weight?: number; completed?: boolean; }
+export interface PlanExercise { id: string; exercise: string; sets: PlanSet[]; }
+export interface AiWorkoutPlan { id: string; user_id: string; date: string; muscle_group: string; plan_name: string; preferences?: string; plan_data: PlanExercise[]; created_at: string; }

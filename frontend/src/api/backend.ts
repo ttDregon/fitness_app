@@ -36,17 +36,6 @@ export async function parseWorkout(text: string, userId?: string): Promise<any> 
   return response.json();
 }
 
-// Распознавание блюда -> { name, calories, protein, fat, carbs }
-export async function parseMeal(text: string): Promise<any> {
-  const response = await fetch(`${getBackendUrl()}/parse_meal`, {
-    method: 'POST',
-    headers: await authHeaders(),
-    body: JSON.stringify({ text }),
-  });
-  if (!response.ok) throw new Error(`Ошибка сервера: статус ${response.status}`);
-  return response.json();
-}
-
 // Разбор питания на приёмы и продукты -> { meals: [{ meal_type, items: [{name,calories,protein,fat,carbs}] }] }
 export async function parseMeals(text: string, userId?: string): Promise<any> {
   const response = await fetch(`${getBackendUrl()}/parse_meals`, {
@@ -82,11 +71,29 @@ export async function notifyUser(toUserId: string, title: string, body: string, 
 }
 
 // Чат с ИИ -> { reply, calories, protein, fat, carbs }
-export async function sendChat(messages: { role: string; content: string }[], userId?: string): Promise<any> {
+// dailyCalorieNorm/dailyMacros — уже посчитанная на клиенте норма (см. utils/nutrition.ts),
+// чтобы советы ИИ по питанию опирались на реальные цифры, а не придумывались заново.
+export async function sendChat(
+  messages: { role: string; content: string }[],
+  userId?: string,
+  dailyCalorieNorm?: number,
+  dailyMacros?: { protein: number; fat: number; carb: number }
+): Promise<any> {
   const response = await fetch(`${getBackendUrl()}/chat`, {
     method: 'POST',
     headers: await authHeaders(),
-    body: JSON.stringify({ messages, user_id: userId }),
+    body: JSON.stringify({ messages, user_id: userId, daily_calorie_norm: dailyCalorieNorm, daily_macros: dailyMacros }),
+  });
+  if (!response.ok) throw new Error('Бэкенд не отвечает');
+  return response.json();
+}
+
+// Генерация ИИ-плана тренировки под группу мышц -> { status, plan: { plan_name, exercises } }
+export async function generateWorkoutPlan(muscleGroup: string, preferences: string, userId?: string): Promise<any> {
+  const response = await fetch(`${getBackendUrl()}/generate_workout_plan`, {
+    method: 'POST',
+    headers: await authHeaders(),
+    body: JSON.stringify({ muscle_group: muscleGroup, preferences, user_id: userId }),
   });
   if (!response.ok) throw new Error('Бэкенд не отвечает');
   return response.json();

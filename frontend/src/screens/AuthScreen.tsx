@@ -2,16 +2,58 @@ import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, LayoutAnimation } from 'react-native';
 import { ScrollPicker } from '../components/ScrollPicker';
 import { GradientButton } from '../components/Gradient';
-import { TRAINER_PLANS } from '../config/billing';
 import { ageData, heightWholeData, weightWholeData, decimalsData } from '../utils/pickers';
 import { styles } from '../styles';
 import { COLORS, GRADIENTS } from '../theme';
 import { useApp } from '../context/AppContext';
 
+type QuizRole = 'client' | 'trainer';
+
+// Вопросы квиза "Тренер или Пользователь?". Каждый ответ добавляет очки к
+// склонности "тренер"; итог 0-2 → Пользователь, 3-6 → Тренер (см. quiz_result).
+const QUIZ_QUESTIONS: { title: string; question: string; answers: { label: string; score: number }[] }[] = [
+  {
+    title: 'Тренер или Пользователь?',
+    question: 'Что тебе ближе?',
+    answers: [
+      { label: '🏋️ Я тренируюсь сам(а)', score: 0 },
+      { label: '👥 Я веду других людей', score: 2 },
+    ],
+  },
+  {
+    title: 'Ещё один вопрос',
+    question: 'Как ты обычно работаешь с планом тренировок?',
+    answers: [
+      { label: '📋 Слежу за своим прогрессом и чек-листом', score: 0 },
+      { label: '🤝 И то, и другое — тренируюсь сам(а) и веду группу', score: 1 },
+      { label: '📤 Составляю и назначаю программы клиентам', score: 2 },
+    ],
+  },
+  {
+    title: 'Последнее',
+    question: 'Что важнее прямо сейчас?',
+    answers: [
+      { label: '🎯 Достигать своей цели по весу/форме', score: 0 },
+      { label: '📊 Видеть прогресс своих клиентов и назначать им планы/питание', score: 2 },
+    ],
+  },
+];
+
+const ROLE_INFO: Record<QuizRole, { title: string; desc: string }> = {
+  trainer: {
+    title: 'Тренер',
+    desc: 'Тренер может: создавать клубы, добавлять клиентов, назначать им тренировки и питание, следить за их прогрессом. Личный дневник тренировок и питания тоже остаётся доступен.',
+  },
+  client: {
+    title: 'Пользователь',
+    desc: 'Пользователь ведёт свой дневник тренировок и питания, ставит цели по весу, общается с ИИ-ассистентом и может вступить в клуб тренера по коду.',
+  },
+};
+
 export default function AuthScreen() {
   const {
     authMode, setAuthMode, email, setEmail, password, setPassword, confirmPassword, setConfirmPassword,
-    name, setName, isLoadingAuth, handleLogin, smoothStateUpdate, setUserRole, setPendingTrainerPlan,
+    name, setName, isLoadingAuth, handleLogin, smoothStateUpdate, setUserRole,
     handleCredentialsNext, handleGoalNext, workoutsPerWeek, setWorkoutsPerWeek, goal,
     userGender, setUserGender, userAge, setUserAge,
     userHeightWhole, setUserHeightWhole, userHeightDec, setUserHeightDec,
@@ -19,6 +61,34 @@ export default function AuthScreen() {
     targetWeightWhole, setTargetWeightWhole, targetWeightDec, setTargetWeightDec,
     handleFinalRegister,
   } = useApp();
+
+  // Локальный прогресс квиза — не нужен нигде за пределами этого экрана.
+  const [quizStep, setQuizStep] = React.useState(0);
+  const [quizScore, setQuizScore] = React.useState(0);
+  const [quizSuggestedRole, setQuizSuggestedRole] = React.useState<QuizRole>('client');
+  // Куда вернуться кнопкой "Назад" с экрана register_credentials.
+  const [roleSourceScreen, setRoleSourceScreen] = React.useState<'quiz_result' | 'role_select'>('quiz_result');
+
+  const goQuiz = (mode: string) => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setAuthMode(mode); };
+
+  const answerQuiz = (score: number) => {
+    const total = quizScore + score;
+    if (quizStep < QUIZ_QUESTIONS.length - 1) {
+      setQuizScore(total);
+      setQuizStep(quizStep + 1);
+      goQuiz(`quiz_q${quizStep + 2}`);
+    } else {
+      setQuizSuggestedRole(total >= 3 ? 'trainer' : 'client');
+      setQuizScore(0);
+      setQuizStep(0);
+      goQuiz('quiz_result');
+    }
+  };
+
+  const pickRole = (role: QuizRole, source: 'quiz_result' | 'role_select') => {
+    setRoleSourceScreen(source);
+    smoothStateUpdate(() => { setUserRole(role); setAuthMode('register_credentials'); });
+  };
 
   if (authMode === 'login') {
     return (
@@ -30,9 +100,49 @@ export default function AuthScreen() {
         <GradientButton colors={GRADIENTS.primary} style={styles.button} onPress={handleLogin} disabled={isLoadingAuth}>
           {isLoadingAuth ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Войти</Text>}
         </GradientButton>
-        <TouchableOpacity onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); setAuthMode('role_select'); }} style={{marginTop: 30}}>
+        <TouchableOpacity onPress={() => goQuiz('quiz_q1')} style={{marginTop: 30}}>
           <Text style={styles.linkText}>Нет аккаунта? Зарегистрироваться</Text>
         </TouchableOpacity>
+      </View>
+    );
+  }
+  if (authMode.startsWith('quiz_q')) {
+    const idx = Number(authMode.replace('quiz_q', '')) - 1;
+    const q = QUIZ_QUESTIONS[idx];
+    if (!q) return null;
+    return (
+      <View style={styles.authContainer}>
+        <Text style={styles.title}>{q.title}</Text>
+        <Text style={styles.subtitle}>Ответь на пару вопросов — подберём подходящую роль.</Text>
+        <Text style={[styles.label, {textAlign: 'center', width: '100%', marginBottom: 16, marginTop: 6}]}>{q.question}</Text>
+        {q.answers.map((a, i) => (
+          <TouchableOpacity key={i} style={styles.wizardOptionBtn} onPress={() => answerQuiz(a.score)}>
+            <Text style={styles.wizardOptionText}>{a.label}</Text>
+          </TouchableOpacity>
+        ))}
+        {idx === 0 && (
+          <TouchableOpacity onPress={() => goQuiz('role_select')} style={{marginTop: 20}}>
+            <Text style={styles.linkText}>Уже знаю свою роль → выбрать вручную</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity onPress={() => goQuiz(idx === 0 ? 'login' : `quiz_q${idx}`)} style={styles.backButton}><Text style={styles.backButtonText}>← Назад</Text></TouchableOpacity>
+      </View>
+    );
+  }
+  if (authMode === 'quiz_result') {
+    const info = ROLE_INFO[quizSuggestedRole];
+    const other: QuizRole = quizSuggestedRole === 'trainer' ? 'client' : 'trainer';
+    return (
+      <View style={styles.authContainer}>
+        <Text style={styles.title}>Похоже, тебе подходит роль «{info.title}»</Text>
+        <Text style={[styles.subtitle, {marginBottom: 24}]}>{info.desc}</Text>
+        <GradientButton colors={GRADIENTS.violetIndigo} style={styles.button} onPress={() => pickRole(quizSuggestedRole, 'quiz_result')}>
+          <Text style={styles.buttonText}>Продолжить как {info.title.toLowerCase()}</Text>
+        </GradientButton>
+        <TouchableOpacity onPress={() => pickRole(other, 'quiz_result')} style={{marginTop: 16}}>
+          <Text style={styles.linkText}>Выбрать другую роль ({ROLE_INFO[other].title.toLowerCase()})</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => goQuiz('quiz_q1')} style={styles.backButton}><Text style={styles.backButtonText}>← Пройти квиз заново</Text></TouchableOpacity>
       </View>
     );
   }
@@ -41,38 +151,9 @@ export default function AuthScreen() {
       <View style={styles.authContainer}>
         <Text style={styles.title}>Новый аккаунт</Text>
         <Text style={styles.subtitle}>Выберите свою роль</Text>
-        <GradientButton colors={GRADIENTS.violetIndigo} style={styles.choiceButton} onPress={() => { smoothStateUpdate(() => { setUserRole('client'); setAuthMode('register_credentials'); }); }}><Text style={styles.buttonText}>Я Клиент</Text><Text style={styles.subText}>Тренируюсь по плану</Text></GradientButton>
-        <TouchableOpacity style={[styles.choiceButton, {backgroundColor: COLORS.cardAlt, borderWidth: 1, borderColor: 'rgba(251, 113, 133, 0.4)'}]} onPress={() => { smoothStateUpdate(() => { setUserRole('trainer'); setAuthMode('trainer_intro'); }); }}><Text style={[styles.buttonText, {color: COLORS.textPrimary}]}>Я Тренер</Text><Text style={[styles.subText, {color: COLORS.textSecondary}]}>Веду клиентов · по подписке</Text></TouchableOpacity>
-        <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode('login')); }} style={styles.backButton}><Text style={styles.backButtonText}>← Вернуться ко входу</Text></TouchableOpacity>
-      </View>
-    );
-  }
-  if (authMode === 'trainer_intro') {
-    return (
-      <View style={styles.authContainer}>
-        <Text style={styles.title}>Подписка «Тренер»</Text>
-        <Text style={styles.subtitle}>Выберите тариф — оплата в Telegram откроется сразу после регистрации.</Text>
-        {TRAINER_PLANS.map(p => (
-          <TouchableOpacity
-            key={p.id}
-            activeOpacity={0.85}
-            onPress={() => { smoothStateUpdate(() => { setPendingTrainerPlan(p.id); setAuthMode('register_credentials'); }); }}
-            style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 18, padding: 18, marginBottom: 12, borderWidth: 1, borderColor: 'rgba(251,113,133,0.3)' }}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }}>{p.label}</Text>
-              <Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 3 }}>Выбрать и оплатить после регистрации →</Text>
-            </View>
-            <Text style={{ color: COLORS.rose, fontSize: 18, fontWeight: '900' }}>${p.priceUsd}</Text>
-          </TouchableOpacity>
-        ))}
-        <Text style={{ color: COLORS.textMuted, fontSize: 13, textAlign: 'center', marginVertical: 14, lineHeight: 19 }}>
-          Без подписки тренерские функции закрыты, но аккаунт и личные функции доступны.
-        </Text>
-        <GradientButton colors={GRADIENTS.rose} style={styles.button} onPress={() => { smoothStateUpdate(() => setAuthMode('register_credentials')); }}>
-          <Text style={styles.buttonText}>Продолжить без подписки →</Text>
-        </GradientButton>
-        <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode('role_select')); }} style={styles.backButton}><Text style={styles.backButtonText}>← Назад к выбору роли</Text></TouchableOpacity>
+        <GradientButton colors={GRADIENTS.violetIndigo} style={styles.choiceButton} onPress={() => pickRole('client', 'role_select')}><Text style={styles.buttonText}>Я Клиент</Text><Text style={styles.subText}>Тренируюсь по плану</Text></GradientButton>
+        <TouchableOpacity style={[styles.choiceButton, {backgroundColor: COLORS.cardAlt, borderWidth: 1, borderColor: 'rgba(251, 113, 133, 0.4)'}]} onPress={() => pickRole('trainer', 'role_select')}><Text style={[styles.buttonText, {color: COLORS.textPrimary}]}>Я Тренер</Text><Text style={[styles.subText, {color: COLORS.textSecondary}]}>Веду клиентов</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => goQuiz('quiz_q1')} style={styles.backButton}><Text style={styles.backButtonText}>← Вернуться к квизу</Text></TouchableOpacity>
       </View>
     );
   }
@@ -88,7 +169,7 @@ export default function AuthScreen() {
         <GradientButton colors={GRADIENTS.primary} style={[styles.button, {marginTop: 15}]} onPress={handleCredentialsNext} disabled={isLoadingAuth || !passwordsMatch}>
           {isLoadingAuth ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Далее →</Text>}
         </GradientButton>
-        <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode('role_select')); }} style={styles.backButton}><Text style={styles.backButtonText}>← К выбору роли</Text></TouchableOpacity>
+        <TouchableOpacity onPress={() => { smoothStateUpdate(() => setAuthMode(roleSourceScreen)); }} style={styles.backButton}><Text style={styles.backButtonText}>← К выбору роли</Text></TouchableOpacity>
       </View>
     );
   }

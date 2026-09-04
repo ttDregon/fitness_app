@@ -80,6 +80,10 @@ function useAppController() {
   const [waterIntake, setWaterIntake] = useState<number>(0);
   const [history, setHistory] = useState<WorkoutRecord[]>([]);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
+  // План, предложенный ИИ прямо в обычном чате (см. workout_plan в /chat). Экран журнала
+  // мгновенно консьюмит его при монтировании и превращает в блоки конструктора — тот же
+  // путь, что и для плана из модалки "Сгенерировать план".
+  const [pendingWorkoutPlan, setPendingWorkoutPlan] = useState<GeneratedWorkoutPlan | null>(null);
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [activeGroup, setActiveGroup] = useState<Group | null>(null);
@@ -1210,7 +1214,7 @@ function useAppController() {
         return;
       }
 
-      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai' };
+      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai', workoutPlan: data.workout_plan || undefined };
       smoothStateUpdate(() => {
         setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, aiMsg], updatedAt: Date.now() } : c));
       });
@@ -1222,6 +1226,13 @@ function useAppController() {
       const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "Не удалось связаться с ИИ. Проверьте интернет и попробуйте ещё раз.", sender: 'ai' };
       smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, errorMsg], updatedAt: Date.now() } : c)));
     } finally { setIsChatLoading(false); }
+  };
+
+  // Кнопка "Добавить в тренировку" под сообщением чата: кладём план в pendingWorkoutPlan
+  // и переключаемся на вкладку журнала — там он подхватится и станет блоками конструктора.
+  const sendPlanToJournal = (plan: GeneratedWorkoutPlan) => {
+    setPendingWorkoutPlan(plan);
+    handleTabChange('workout');
   };
 
   const handleSendChatMessage = async (messageText: string) => {
@@ -1253,7 +1264,7 @@ function useAppController() {
         return;
       }
 
-      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai' };
+      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai', workoutPlan: data.workout_plan || undefined };
       smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, aiMsg], updatedAt: Date.now() } : c)));
 
       if (data.calories && data.calories > 0) {
@@ -1487,7 +1498,7 @@ function useAppController() {
 
     // workout journal
     history, sendToAI, addStructuredWorkout,
-    isGeneratingPlan, generateAiWorkoutPlan,
+    isGeneratingPlan, generateAiWorkoutPlan, pendingWorkoutPlan, setPendingWorkoutPlan, sendPlanToJournal,
 
     // groups / clubs
     groups, activeGroup, setActiveGroup, groupMembers, setGroupMembers, todayWorkouts, setTodayWorkouts,

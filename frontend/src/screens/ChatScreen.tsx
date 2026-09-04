@@ -32,7 +32,7 @@ export default function ChatScreen() {
     isChatSidebarVisible, setIsChatSidebarVisible, createNewChat, chatSessions, activeChatId,
     smoothStateUpdate, setActiveChatId, deleteChat, displayName, openAnimatedModal, handleTabChange,
     editingMessageId, editInput, setEditInput, setEditingMessageId, saveEditMessage, startEditMessage,
-    isChatLoading, handleSendChatMessage, chatScrollRef,
+    isChatLoading, handleSendChatMessage, chatScrollRef, sendPlanToJournal,
   } = useApp();
   // Локальный стейт ввода — чтобы набор текста не перерисовывал весь общий контекст.
   const [chatInput, setChatInput] = useState('');
@@ -137,6 +137,23 @@ export default function ChatScreen() {
                     <Ionicons name="pencil" size={14} color="#fff" />
                   </TouchableOpacity>
                 )}
+                {/* ИИ предложил конкретную тренировку прямо в чате — можно закинуть её
+                    в конструктор журнала одним нажатием, не переписывая руками. */}
+                {msg.sender === 'ai' && msg.workoutPlan && (
+                  <View style={workoutPlanCard}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                      <Ionicons name="barbell" size={16} color={COLORS.amber} />
+                      <Text style={workoutPlanTitle} numberOfLines={1}>{msg.workoutPlan.plan_name || 'Тренировка'}</Text>
+                    </View>
+                    <Text style={workoutPlanExercises} numberOfLines={2}>
+                      {msg.workoutPlan.exercises.map(e => e.exercise).join(' · ')}
+                    </Text>
+                    <TouchableOpacity onPress={() => sendPlanToJournal(msg.workoutPlan!)} style={addPlanBtn}>
+                      <Ionicons name="add-circle" size={18} color="#1A1205" />
+                      <Text style={addPlanBtnText}>Добавить в тренировку</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             )
           ))}
@@ -151,3 +168,9 @@ export default function ChatScreen() {
     </View>
   );
 }
+
+const workoutPlanCard = { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.08)' };
+const workoutPlanTitle = { color: COLORS.textPrimary, fontWeight: '800' as const, fontSize: 14, marginLeft: 6, flex: 1 };
+const workoutPlanExercises = { color: COLORS.textSecondary, fontSize: 12, marginBottom: 10, lineHeight: 17 };
+const addPlanBtn = { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: COLORS.amber, paddingVertical: 10, borderRadius: 14 };
+const addPlanBtnText = { color: '#1A1205', fontWeight: '800' as const, fontSize: 13, marginLeft: 6 };

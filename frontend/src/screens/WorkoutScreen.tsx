@@ -9,7 +9,7 @@ import { useApp } from '../context/AppContext';
 import { appAlert } from '../components/AppAlert';
 import { EXERCISES, EXERCISE_GROUPS } from '../data/exercises';
 import type { ExerciseDef } from '../data/exercises';
-import type { WorkoutRecord, GroupedWorkout, WorkoutData } from '../types';
+import type { WorkoutRecord, GroupedWorkout, WorkoutData, GeneratedWorkoutPlan } from '../types';
 
 // Подход в конструкторе: и вручную добавленный, и предложенный ИИ — один и тот же тип,
 // отличаются только источником блока (source). Отмечается галочкой "выполнено" и только
@@ -26,10 +26,23 @@ const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.ge
 // Первая буква названия упражнения — всегда заглавная (для отображения).
 const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
+// План от ИИ (из модалки "Сгенерировать план" или предложенный прямо в чате) -> блоки
+// конструктора. existing — названия упражнений, уже присутствующих в списке (не дублируем).
+const buildAiBlocks = (plan: GeneratedWorkoutPlan, existing: Set<string>): BBlock[] =>
+  (plan.exercises || [])
+    .filter(ex => ex.exercise && !existing.has(cap(ex.exercise)))
+    .map(ex => ({
+      id: uid('b'),
+      exercise: cap(ex.exercise),
+      source: 'ai' as const,
+      sets: (ex.sets && ex.sets.length ? ex.sets : [{ target_reps: 8, target_weight: 0 }])
+        .map(s => newSet(s.target_reps != null ? String(s.target_reps) : '', s.target_weight != null ? String(s.target_weight) : '')),
+    }));
+
 export default function WorkoutScreen() {
   const {
     handleTabChange, sendToAI, isLoading, history, addStructuredWorkout,
-    isGeneratingPlan, generateAiWorkoutPlan,
+    isGeneratingPlan, generateAiWorkoutPlan, pendingWorkoutPlan, setPendingWorkoutPlan,
   } = useApp();
   const [note, setNote] = useState('');
 
@@ -46,16 +59,7 @@ export default function WorkoutScreen() {
     // конструктора, с уже проставленными подходами/весом. Дальше пользователь
     // работает с ними точно так же, как с блоками, добавленными вручную.
     setBlocks(prev => {
-      const existing = new Set(prev.map(b => b.exercise));
-      const additions: BBlock[] = plan.exercises
-        .filter(ex => ex.exercise && !existing.has(cap(ex.exercise)))
-        .map(ex => ({
-          id: uid('b'),
-          exercise: cap(ex.exercise),
-          source: 'ai',
-          sets: (ex.sets && ex.sets.length ? ex.sets : [{ target_reps: 8, target_weight: 0 }])
-            .map(s => newSet(s.target_reps != null ? String(s.target_reps) : '', s.target_weight != null ? String(s.target_weight) : '')),
-        }));
+      const additions = buildAiBlocks(plan, new Set(prev.map(b => b.exercise)));
       if (additions.length === 0) {
         appAlert('Уже в списке', 'Эти упражнения уже есть в конструкторе ниже — отметь подходы там.');
         return prev;
@@ -67,6 +71,17 @@ export default function WorkoutScreen() {
 
   // --- Конструктор тренировки (блоки упражнений с подходами) ---
   const [blocks, setBlocks] = useState<BBlock[]>([]);
+
+  // ИИ мог предложить тренировку прямо в обычном чате ("Добавить в тренировку" под
+  // сообщением) — она приезжает сюда через контекст и точно так же превращается в блоки.
+  useEffect(() => {
+    if (!pendingWorkoutPlan) return;
+    setBlocks(prev => {
+      const additions = buildAiBlocks(pendingWorkoutPlan, new Set(prev.map(b => b.exercise)));
+      return additions.length ? [...prev, ...additions] : prev;
+    });
+    setPendingWorkoutPlan(null);
+  }, [pendingWorkoutPlan, setPendingWorkoutPlan]);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');

@@ -183,7 +183,7 @@ function useAppController() {
     // успел отрендериться/смонтироваться, и без этой отсрочки часть длительности анимации
     // "сгорает" впустую, пока экран монтируется — на глаз это выглядит как отсутствие плавности.
     requestAnimationFrame(() => {
-      Animated.timing(contentFadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+      Animated.timing(contentFadeAnim, { toValue: 1, duration: 280, useNativeDriver: true, easing: Easing.out(Easing.cubic) }).start();
     });
   };
 

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Modal, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GradientButton } from '../components/Gradient';
 import { styles } from '../styles';
@@ -9,14 +9,17 @@ import { useApp } from '../context/AppContext';
 import { appAlert } from '../components/AppAlert';
 import { EXERCISES, EXERCISE_GROUPS } from '../data/exercises';
 import type { ExerciseDef } from '../data/exercises';
-import type { WorkoutRecord, GroupedWorkout, WorkoutData, AiWorkoutPlan } from '../types';
+import type { WorkoutRecord, GroupedWorkout, WorkoutData } from '../types';
 
-interface BSet { id: string; reps: string; weight: string }
-interface BBlock { id: string; exercise: string; sets: BSet[] }
+// Подход в конструкторе: и вручную добавленный, и предложенный ИИ — один и тот же тип,
+// отличаются только источником блока (source). Отмечается галочкой "выполнено" и только
+// такие подходы попадают в историю при сохранении.
+interface BSet { id: string; reps: string; weight: string; completed: boolean }
+interface BBlock { id: string; exercise: string; sets: BSet[]; source: 'manual' | 'ai' }
 
 const uid = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-const newSet = (): BSet => ({ id: uid('s'), reps: '', weight: '' });
-const newBlock = (name: string): BBlock => ({ id: uid('b'), exercise: name, sets: [newSet()] });
+const newSet = (reps = '', weight = ''): BSet => ({ id: uid('s'), reps, weight, completed: false });
+const newBlock = (name: string, source: BBlock['source'] = 'manual'): BBlock => ({ id: uid('b'), exercise: name, source, sets: [newSet()] });
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -26,7 +29,7 @@ const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 export default function WorkoutScreen() {
   const {
     handleTabChange, sendToAI, isLoading, history, addStructuredWorkout,
-    aiPlans, isGeneratingPlan, generateAiWorkoutPlan, updateAiPlanSet, commitAiWorkoutPlan,
+    isGeneratingPlan, generateAiWorkoutPlan,
   } = useApp();
   const [note, setNote] = useState('');
 
@@ -36,8 +39,30 @@ export default function WorkoutScreen() {
   const [planPrefs, setPlanPrefs] = useState('');
   const submitPlanRequest = async () => {
     if (!planMuscleGroup) { appAlert('Выбери группу мышц', 'Например «Грудь» или «Всё тело».'); return; }
-    const ok = await generateAiWorkoutPlan(planMuscleGroup, planPrefs);
-    if (ok) { setPlanModalVisible(false); setPlanMuscleGroup(''); setPlanPrefs(''); }
+    const plan = await generateAiWorkoutPlan(planMuscleGroup, planPrefs);
+    if (!plan) return; // сообщение об ошибке/лимите уже показано внутри generateAiWorkoutPlan
+
+    // ИИ сам "выбирает" упражнения — просто добавляем их как обычные блоки
+    // конструктора, с уже проставленными подходами/весом. Дальше пользователь
+    // работает с ними точно так же, как с блоками, добавленными вручную.
+    setBlocks(prev => {
+      const existing = new Set(prev.map(b => b.exercise));
+      const additions: BBlock[] = plan.exercises
+        .filter(ex => ex.exercise && !existing.has(cap(ex.exercise)))
+        .map(ex => ({
+          id: uid('b'),
+          exercise: cap(ex.exercise),
+          source: 'ai',
+          sets: (ex.sets && ex.sets.length ? ex.sets : [{ target_reps: 8, target_weight: 0 }])
+            .map(s => newSet(s.target_reps != null ? String(s.target_reps) : '', s.target_weight != null ? String(s.target_weight) : '')),
+        }));
+      if (additions.length === 0) {
+        appAlert('Уже в списке', 'Эти упражнения уже есть в конструкторе ниже — отметь подходы там.');
+        return prev;
+      }
+      return [...prev, ...additions];
+    });
+    setPlanModalVisible(false); setPlanMuscleGroup(''); setPlanPrefs('');
   };
 
   // --- Конструктор тренировки (блоки упражнений с подходами) ---
@@ -61,7 +86,7 @@ export default function WorkoutScreen() {
   const commitSelection = () => {
     setBlocks(prev => {
       const existing = new Set(prev.map(b => b.exercise));
-      const additions = selected.filter(n => !existing.has(n)).map(newBlock);
+      const additions = selected.filter(n => !existing.has(n)).map(n => newBlock(n, 'manual'));
       return [...prev, ...additions];
     });
     setSelected([]);
@@ -86,15 +111,23 @@ export default function WorkoutScreen() {
           : b
       )
     );
+  // Отметка "выполнил этот подход" — только такие подходы уйдут в историю.
+  const toggleSetDone = (blockId: string, setId: string) =>
+    setBlocks(prev =>
+      prev.map(b =>
+        b.id === blockId ? { ...b, sets: b.sets.map(s => (s.id === setId ? { ...s, completed: !s.completed } : s)) } : b
+      )
+    );
 
   // Подход считается заполненным, если есть вес ИЛИ повторы (вес 0 — это норм для упражнений с весом тела).
   const isFilled = (s: BSet) => (Number(s.weight) || 0) > 0 || (Number(s.reps) || 0) > 0;
-  const filledCount = blocks.reduce((n, b) => n + b.sets.filter(isFilled).length, 0);
+  const isDone = (s: BSet) => s.completed && isFilled(s);
+  const doneCount = blocks.reduce((n, b) => n + b.sets.filter(isDone).length, 0);
 
   const saveBlocks = async () => {
     const items = blocks
-      .flatMap(b => b.sets.filter(isFilled).map(s => ({ exercise: b.exercise, weight: Number(s.weight) || 0, reps: Number(s.reps) || 0 })));
-    if (items.length === 0) { appAlert('Пусто', 'Заполни вес или повторы хотя бы в одном подходе.'); return; }
+      .flatMap(b => b.sets.filter(isDone).map(s => ({ exercise: b.exercise, weight: Number(s.weight) || 0, reps: Number(s.reps) || 0 })));
+    if (items.length === 0) { appAlert('Нечего сохранять', 'Заполни подход и отметь его галочкой ✓ — «выполнено».'); return; }
     const ok = await addStructuredWorkout(items);
     if (ok) { setBlocks([]); setDayIdx(Math.max(0, dayGroups.keys.length - 1)); }
   };
@@ -140,71 +173,45 @@ export default function WorkoutScreen() {
       </View>
 
       {/* Быстрая запись через ИИ */}
+      <Text style={sectionCaption}>Быстрая запись</Text>
       <View style={styles.inputSection}>
         <TextInput style={styles.inputArea} multiline placeholder="Жим 100кг 5 по 5..." placeholderTextColor={COLORS.textSecondary} value={note} onChangeText={setNote} />
         <GradientButton colors={GRADIENTS.amber} style={styles.button} onPress={async () => { const ok = await sendToAI(note); if (ok) setNote(''); }} disabled={isLoading}>{isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Сохранить с помощью ИИ</Text>}</GradientButton>
       </View>
 
-      {/* Сгенерировать план тренировки через ИИ */}
-      <TouchableOpacity onPress={() => setPlanModalVisible(true)} style={[styles.mainActionBtn, { backgroundColor: COLORS.cardAlt, borderWidth: 1, borderColor: 'rgba(139,92,246,0.35)', marginBottom: 20 }]}>
-        <Ionicons name="sparkles" size={22} color={COLORS.indigo} style={{ marginRight: 10 }} />
-        <Text style={[styles.mainActionText, { color: COLORS.textPrimary }]}>Сгенерировать план (ИИ)</Text>
+      {/* Конструктор тренировки */}
+      <Text style={sectionCaption}>Тренировка</Text>
+
+      {/* Сгенерировать план через ИИ */}
+      <TouchableOpacity onPress={() => setPlanModalVisible(true)} style={aiPlanTrigger}>
+        <View style={aiPlanIconWrap}><Ionicons name="sparkles" size={20} color={COLORS.indigo} /></View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }}>Сгенерировать план</Text>
+          <Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>ИИ подберёт упражнения по твоей истории</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
       </TouchableOpacity>
 
-      {/* Черновики ИИ-планов: план vs факт, чек-лист по подходам */}
-      {aiPlans.map((plan: AiWorkoutPlan) => (
-        <View key={plan.id} style={aiPlanCard}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-            <Ionicons name="sparkles" size={18} color={COLORS.indigo} style={{ marginRight: 8 }} />
-            <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }} numberOfLines={1}>{plan.plan_name}</Text>
-          </View>
-          <Text style={{ color: COLORS.textMuted, fontSize: 12, marginBottom: 12 }}>{plan.muscle_group}</Text>
-
-          {plan.plan_data.map(ex => (
-            <View key={ex.id} style={{ marginBottom: 14 }}>
-              <Text style={styles.groupExerciseTitle}>{cap(ex.exercise)}</Text>
-              {ex.sets.map((s, i) => (
-                <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8 }}>
-                  <Text style={{ width: 90, color: COLORS.textSecondary, fontSize: 13, fontWeight: '700' }}>план {s.target_weight}кг×{s.target_reps}</Text>
-                  <TextInput
-                    style={miniInput} keyboardType="numeric" placeholder="факт повт" placeholderTextColor={COLORS.textMuted}
-                    value={s.actual_reps != null ? String(s.actual_reps) : ''}
-                    onChangeText={v => updateAiPlanSet(plan.id, ex.id, s.id, { actualReps: Number(v.replace(/[^0-9]/g, '')) || 0 })}
-                  />
-                  <TextInput
-                    style={miniInput} keyboardType="numeric" placeholder="факт кг" placeholderTextColor={COLORS.textMuted}
-                    value={s.actual_weight != null ? String(s.actual_weight) : ''}
-                    onChangeText={v => updateAiPlanSet(plan.id, ex.id, s.id, { actualWeight: Number(v.replace(/[^0-9.]/g, '')) || 0 })}
-                  />
-                  <TouchableOpacity onPress={() => updateAiPlanSet(plan.id, ex.id, s.id, { completed: !s.completed })} style={{ paddingLeft: 8 }}>
-                    <Ionicons name={s.completed ? 'checkmark-circle' : 'ellipse-outline'} size={26} color={s.completed ? COLORS.emerald : COLORS.textMuted} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          ))}
-
-          <GradientButton colors={GRADIENTS.violetIndigo} style={[styles.button, { marginTop: 4 }]} onPress={() => commitAiWorkoutPlan(plan.id)} disabled={isLoading}>
-            {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Добавить в историю</Text>}
-          </GradientButton>
-        </View>
-      ))}
-
-      {/* Конструктор: блоки упражнений */}
+      {/* Блоки упражнений (и вручную добавленные, и предложенные ИИ) */}
       {blocks.map(block => (
-        <View key={block.id} style={blockCard}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-            <Ionicons name="barbell" size={20} color={COLORS.amber} style={{ marginRight: 8 }} />
+        <View key={block.id} style={[blockCard, block.source === 'ai' && blockCardAi]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+            <View style={[blockIconWrap, block.source === 'ai' && blockIconWrapAi]}>
+              <Ionicons name={block.source === 'ai' ? 'sparkles' : 'barbell'} size={16} color={block.source === 'ai' ? COLORS.indigo : COLORS.amber} />
+            </View>
             <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 17, fontWeight: '800' }} numberOfLines={2}>{cap(block.exercise)}</Text>
             <TouchableOpacity onPress={() => removeBlock(block.id)} style={{ padding: 4 }}><Ionicons name="trash-outline" size={20} color={COLORS.error} /></TouchableOpacity>
           </View>
 
           {block.sets.map((s, i) => (
-            <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-              <Text style={{ width: 86, color: COLORS.textSecondary, fontSize: 14, fontWeight: '700' }}>Подход {i + 1}</Text>
+            <View key={s.id} style={[setRowCard, s.completed && setRowCardDone]}>
+              <View style={[setIndexBadge, s.completed && setIndexBadgeDone]}><Text style={[setIndexText, s.completed && setIndexTextDone]}>{i + 1}</Text></View>
               <TextInput style={miniInput} keyboardType="numeric" placeholder="повт" placeholderTextColor={COLORS.textMuted} value={s.reps} onChangeText={v => updateSet(block.id, s.id, 'reps', v)} />
               <TextInput style={miniInput} keyboardType="numeric" placeholder="кг" placeholderTextColor={COLORS.textMuted} value={s.weight} onChangeText={v => updateSet(block.id, s.id, 'weight', v)} />
-              <TouchableOpacity onPress={() => removeSet(block.id, s.id)} style={{ paddingLeft: 8 }}><Ionicons name="close-circle" size={24} color={COLORS.textMuted} /></TouchableOpacity>
+              <TouchableOpacity onPress={() => toggleSetDone(block.id, s.id)} style={{ paddingHorizontal: 8 }}>
+                <Ionicons name={s.completed ? 'checkmark-circle' : 'ellipse-outline'} size={27} color={s.completed ? COLORS.emerald : COLORS.textMuted} />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => removeSet(block.id, s.id)}><Ionicons name="close-circle" size={22} color={COLORS.textMuted} /></TouchableOpacity>
             </View>
           ))}
 
@@ -221,15 +228,16 @@ export default function WorkoutScreen() {
         <Text style={styles.mainActionText}>Добавить упражнение</Text>
       </GradientButton>
 
-      {/* Сохранить в «сегодня» */}
+      {/* Сохранить в «сегодня» — только отмеченные галочкой подходы */}
       {blocks.length > 0 && (
         <GradientButton colors={GRADIENTS.emerald} style={[styles.button, { marginBottom: 24 }]} onPress={saveBlocks} disabled={isLoading}>
-          {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Добавить ({filledCount})</Text>}
+          {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Добавить в журнал ({doneCount})</Text>}
         </GradientButton>
       )}
 
       {/* История по дням */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, marginBottom: 14 }}>
+      <Text style={sectionCaption}>История</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <TouchableOpacity disabled={safeIdx <= 0} onPress={() => setDayIdx(safeIdx - 1)} style={{ padding: 8, opacity: safeIdx <= 0 ? 0.25 : 1 }}>
           <Ionicons name="chevron-back" size={26} color={COLORS.amber} />
         </TouchableOpacity>
@@ -250,7 +258,11 @@ export default function WorkoutScreen() {
             <View key={gIdx} style={{ marginTop: gIdx === 0 ? 0 : 18 }}>
               <Text style={styles.groupExerciseTitle}>{cap(group.exercise)}</Text>
               {group.sets.map((item: WorkoutData, index: number) => (
-                <View key={index} style={[styles.setRow, { paddingLeft: 10 }]}><Text style={styles.exerciseSetText}>Подход {index + 1}</Text><Text style={styles.setDetails}>{item.weight}кг × {item.reps}</Text></View>
+                <View key={index} style={historySetRow}>
+                  <Ionicons name="checkmark-circle" size={18} color={COLORS.emerald} style={{ marginRight: 10 }} />
+                  <Text style={styles.exerciseSetText}>Подход {index + 1}</Text>
+                  <Text style={styles.setDetails}>{item.weight}кг × {item.reps}</Text>
+                </View>
               ))}
             </View>
           ))}
@@ -339,6 +351,11 @@ export default function WorkoutScreen() {
               placeholderTextColor={COLORS.textSecondary} value={planPrefs} onChangeText={setPlanPrefs}
             />
 
+            <Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 10, lineHeight: 17 }}>
+              ИИ учтёт твой личный журнал (последний вес и повторы) и добавит подобранные упражнения
+              прямо сюда, в конструктор — останется отметить выполненные подходы и нажать «Добавить».
+            </Text>
+
             <GradientButton colors={GRADIENTS.violetIndigo} style={[styles.button, { marginTop: 16 }]} onPress={submitPlanRequest} disabled={isGeneratingPlan || !planMuscleGroup}>
               {isGeneratingPlan ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Сгенерировать</Text>}
             </GradientButton>
@@ -349,7 +366,25 @@ export default function WorkoutScreen() {
   );
 }
 
-const miniInput = { width: 64, height: 44, backgroundColor: COLORS.cardAlt, borderRadius: 12, color: COLORS.textPrimary, textAlign: 'center' as const, marginLeft: 8, fontSize: 15, fontWeight: '700' as const, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' };
+const miniInput = { width: 64, height: 44, backgroundColor: COLORS.bg, borderRadius: 12, color: COLORS.textPrimary, textAlign: 'center' as const, marginRight: 8, fontSize: 15, fontWeight: '700' as const, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' };
+
+const sectionCaption = { color: COLORS.textMuted, fontSize: 12, fontWeight: '800' as const, textTransform: 'uppercase' as const, letterSpacing: 1.4, marginBottom: 10, marginTop: 2 };
+
+const aiPlanTrigger = { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: COLORS.card, borderRadius: 22, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' };
+const aiPlanIconWrap = { width: 40, height: 40, borderRadius: 14, backgroundColor: 'rgba(139,92,246,0.14)', alignItems: 'center' as const, justifyContent: 'center' as const, marginRight: 14 };
+
 const blockCard = { backgroundColor: COLORS.card, borderRadius: 22, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(251,191,36,0.22)' };
-const aiPlanCard = { backgroundColor: COLORS.card, borderRadius: 22, padding: 16, marginBottom: 14, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' };
+const blockCardAi = { borderColor: 'rgba(139,92,246,0.3)' };
+const blockIconWrap = { width: 32, height: 32, borderRadius: 11, backgroundColor: 'rgba(251,191,36,0.14)', alignItems: 'center' as const, justifyContent: 'center' as const, marginRight: 10 };
+const blockIconWrapAi = { backgroundColor: 'rgba(139,92,246,0.14)' };
+
+const setRowCard = { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: COLORS.cardAlt, borderRadius: 16, padding: 8, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' };
+const setRowCardDone = { backgroundColor: 'rgba(52,211,153,0.08)', borderColor: 'rgba(52,211,153,0.3)' };
+const setIndexBadge = { width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center' as const, justifyContent: 'center' as const, marginRight: 10 };
+const setIndexBadgeDone = { backgroundColor: 'rgba(52,211,153,0.2)' };
+const setIndexText = { color: COLORS.textSecondary, fontWeight: '800' as const, fontSize: 12 };
+const setIndexTextDone = { color: COLORS.emerald };
+
 const addSetBtn = { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, paddingVertical: 11, borderRadius: 14, backgroundColor: 'rgba(251,191,36,0.12)', borderWidth: 1, borderColor: 'rgba(251,191,36,0.3)', marginTop: 4 };
+
+const historySetRow = { flexDirection: 'row' as const, alignItems: 'center' as const, marginBottom: 8 };

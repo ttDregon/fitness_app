@@ -342,32 +342,27 @@ async def parse_workout(note: WorkoutNote, request: Request, authorization: Opti
 
 
 def _summarize_workout_history(uid: str, muscle_group: str) -> str:
-    """Короткая сводка последних тренировок для этой группы мышц: план vs факт,
-    чтобы ИИ мог придержать/снизить нагрузку при недовыполнении и прогрессировать
-    при полном выполнении. Читает и личный журнал (workouts), и черновики
-    ИИ-планов (ai_workout_plans) — вторые несут факт по сетам, первый только итог."""
+    """Сводка последних записей личного журнала (workouts) — реальные вес и повторы,
+    которые пользователь сам вносил или подтвердил галочкой «выполнено». Это и есть
+    "что я тренировал в прошлый раз": ИИ должен опираться именно на эти цифры, а не
+    выдумывать нагрузку с нуля."""
     lines = []
     try:
-        plans = supabase.table("ai_workout_plans").select("*") \
-            .eq("user_id", uid).eq("muscle_group", muscle_group) \
-            .order("created_at", desc=True).limit(3).execute()
-        for row in (plans.data or []):
-            for ex in (row.get("plan_data") or []):
-                parts = []
-                for s in ex.get("sets", []):
-                    tgt = f"{s.get('target_weight')}кг×{s.get('target_reps')}"
-                    if s.get("actual_reps") is not None or s.get("actual_weight") is not None:
-                        fact = f"{s.get('actual_weight', s.get('target_weight'))}кг×{s.get('actual_reps', s.get('target_reps'))}"
-                        parts.append(f"план {tgt}, факт {fact}" + ("" if s.get("completed") else " (не завершено)"))
-                    else:
-                        parts.append(f"план {tgt} (не отмечено)")
-                if parts:
-                    lines.append(f"- {row.get('date')}: {ex.get('exercise')} — " + "; ".join(parts))
+        rows = supabase.table("workouts").select("*") \
+            .eq("user_id", uid).order("created_at", desc=True).limit(6).execute()
+        for row in reversed(rows.data or []):  # от старых к новым — виден прогресс
+            date = (row.get("created_at") or "")[:10]
+            for ex in (row.get("parsed_data") or []):
+                name = ex.get("exercise")
+                if not name:
+                    continue
+                lines.append(f"- {date}: {name} — {ex.get('weight', 0)}кг×{ex.get('reps', 0)}")
     except Exception:
         pass
     if not lines:
-        return "Истории тренировок для этой группы мышц пока нет — предложи щадящую стартовую нагрузку."
-    return "ПОСЛЕДНИЕ ТРЕНИРОВКИ (план vs факт):\n" + "\n".join(lines)
+        return "Истории тренировок пока нет — предложи щадящую стартовую нагрузку."
+    lines = lines[-40:]  # не раздуваем промпт
+    return "ПОСЛЕДНИЕ ЗАПИСИ ЛИЧНОГО ЖУРНАЛА (реальные вес и повторы):\n" + "\n".join(lines)
 
 
 @app.post("/generate_workout_plan")
@@ -389,9 +384,10 @@ async def generate_workout_plan(req: WorkoutPlanRequest, request: Request, autho
 
     Правила:
     - Подбери 4-6 упражнений, подходящих группе мышц и предпочтениям.
-    - Если в истории есть недовыполнение (факт меньше плана или "не завершено") — не увеличивай
-      вес/повторы для этого упражнения, при сильном недовыполнении немного снизь нагрузку.
-    - Если прошлая тренировка выполнена полностью — умеренно прогрессируй (+2.5-5кг веса или +1 повтор).
+    - Если в истории журнала есть упражнения из этой же группы/похожие — бери их последний
+      реальный вес и повторы за базу и умеренно прогрессируй (+2.5-5кг веса или +1 повтор),
+      не придумывай нагрузку с нуля, если для упражнения уже есть история.
+    - Для упражнений без истории — предложи консервативную стартовую нагрузку.
     - Для каждого упражнения укажи от 3 до 5 подходов с целевым весом (кг) и повторениями.
 
     Верни ТОЛЬКО валидный JSON без markdown и комментариев, строго такой формат:

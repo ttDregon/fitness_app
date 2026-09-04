@@ -10,7 +10,7 @@ import { appAlert } from '../components/AppAlert';
 import type {
   Session, WorkoutData, SavedAccount, Group, GroupMember, WeightLog,
   WorkoutRecord, AssignedWorkout, TrainingSession, ChatMessage, ChatSession, Macros, MealPreview,
-  MealItem, MealLogRow, FoodItem, AiWorkoutPlan, PlanExercise,
+  MealItem, MealLogRow, FoodItem, GeneratedWorkoutPlan,
 } from '../types';
 
 function useAppController() {
@@ -79,7 +79,6 @@ function useAppController() {
   const [isSideMenuVisible, setIsSideMenuVisible] = useState<boolean>(false);
   const [waterIntake, setWaterIntake] = useState<number>(0);
   const [history, setHistory] = useState<WorkoutRecord[]>([]);
-  const [aiPlans, setAiPlans] = useState<AiWorkoutPlan[]>([]);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
 
   const [groups, setGroups] = useState<Group[]>([]);
@@ -317,7 +316,7 @@ function useAppController() {
     // Ждём ключевые данные (но не дольше 7с), затем снимаем экран загрузки.
     (async () => {
       const tasks = [
-        loadHistory(), loadAiWorkoutPlans(), fetchGroups(), fetchUpcomingSessions(), fetchUserProfileData(),
+        loadHistory(), fetchGroups(), fetchUpcomingSessions(), fetchUserProfileData(),
         fetchWeightLog(), loadTodayNutritionData(), loadClientNutrition(), loadTodayWater(),
       ];
       await Promise.race([
@@ -734,79 +733,27 @@ function useAppController() {
     if (!error && data) setHistory(data as WorkoutRecord[]);
   };
 
-  // --- ИИ-планы тренировок (черновики "план vs факт" до коммита в личный журнал) ---
-  const loadAiWorkoutPlans = async () => {
-    const { data, error } = await supabase.from('ai_workout_plans').select('*').eq('user_id', session?.user?.id).order('created_at', { ascending: false });
-    if (!error && data) setAiPlans(data as AiWorkoutPlan[]);
-  };
-
-  const generateAiWorkoutPlan = async (muscleGroup: string, preferences: string): Promise<boolean> => {
-    if (!muscleGroup.trim()) return false;
+  // --- ИИ-план тренировки ---
+  // Бэкенд сам подтягивает реальную историю журнала пользователя (вес/повторы за
+  // последние тренировки) и строит план на её основе — см. _summarize_workout_history
+  // в backend/main.py. Ничего не сохраняем здесь: экран журнала превращает ответ прямо
+  // в блоки конструктора (тот же UI, что и при ручном добавлении упражнения), и план
+  // попадает в личный журнал только когда пользователь сам отметит выполненные подходы
+  // и нажмёт «Добавить» — обычным addStructuredWorkout.
+  const generateAiWorkoutPlan = async (muscleGroup: string, preferences: string): Promise<GeneratedWorkoutPlan | null> => {
+    if (!muscleGroup.trim()) return null;
     setIsGeneratingPlan(true);
     try {
       const res = await generateWorkoutPlan(muscleGroup, preferences, session?.user?.id);
-      if (res?.status === 'limit_reached') { appAlert('Лимит', `Генерация планов: ${res.limit}/день. Лимит на сегодня исчерпан.`); return false; }
+      if (res?.status === 'limit_reached') { appAlert('Лимит', `Генерация планов: ${res.limit}/день. Лимит на сегодня исчерпан.`); return null; }
       if (!res?.plan || !Array.isArray(res.plan.exercises)) throw new Error('ИИ вернул данные в неверном формате');
-      const exercises: PlanExercise[] = res.plan.exercises.map((ex: any, i: number) => ({
-        id: `ex_${Date.now()}_${i}`,
-        exercise: ex.exercise,
-        sets: (ex.sets || []).map((s: any, j: number) => ({
-          id: `set_${Date.now()}_${i}_${j}`, target_reps: s.target_reps, target_weight: s.target_weight, completed: false,
-        })),
-      }));
-      const row = {
-        user_id: session?.user?.id, date: getCurrentDateString(), muscle_group: muscleGroup,
-        plan_name: res.plan.plan_name || muscleGroup, preferences, plan_data: exercises,
-      };
-      const { data, error } = await supabase.from('ai_workout_plans').insert([row]).select();
-      if (error) throw error;
-      smoothStateUpdate(() => setAiPlans(prev => [...(data as AiWorkoutPlan[]), ...prev]));
-      return true;
+      return res.plan as GeneratedWorkoutPlan;
     } catch (e: any) {
       appAlert('Ошибка', e.message || 'Не удалось сгенерировать план');
-      return false;
+      return null;
     } finally {
       setIsGeneratingPlan(false);
     }
-  };
-
-  // Правка факта по одному подходу (актуальные повторы/вес, отметка выполнения) — черновик,
-  // персистится сразу, чтобы пережить перезапуск приложения посреди тренировки.
-  const updateAiPlanSet = async (
-    planId: string, exerciseId: string, setId: string,
-    updates: { actualReps?: number; actualWeight?: number; completed?: boolean }
-  ) => {
-    const plan = aiPlans.find(p => p.id === planId);
-    if (!plan) return;
-    const newData: PlanExercise[] = plan.plan_data.map(ex => ex.id !== exerciseId ? ex : {
-      ...ex,
-      sets: ex.sets.map(s => s.id !== setId ? s : {
-        ...s,
-        actual_reps: updates.actualReps ?? s.actual_reps,
-        actual_weight: updates.actualWeight ?? s.actual_weight,
-        completed: updates.completed ?? s.completed,
-      }),
-    });
-    smoothStateUpdate(() => setAiPlans(prev => prev.map(p => p.id === planId ? { ...p, plan_data: newData } : p)));
-    await supabase.from('ai_workout_plans').update({ plan_data: newData }).eq('id', planId);
-  };
-
-  // Коммит черновика в личный журнал: по каждому сету берём факт (если отредактирован),
-  // иначе план — тем же путём, что и ручной конструктор (addStructuredWorkout), поэтому
-  // запись сразу попадает в «Историю по дням» и статистику. Черновик после этого удаляется.
-  const commitAiWorkoutPlan = async (planId: string): Promise<boolean> => {
-    const plan = aiPlans.find(p => p.id === planId);
-    if (!plan) return false;
-    const items = plan.plan_data.flatMap(ex => ex.sets.map(s => ({
-      exercise: ex.exercise,
-      weight: s.actual_weight ?? s.target_weight,
-      reps: s.actual_reps ?? s.target_reps,
-    })));
-    const ok = await addStructuredWorkout(items);
-    if (!ok) return false;
-    await supabase.from('ai_workout_plans').delete().eq('id', planId);
-    smoothStateUpdate(() => setAiPlans(prev => prev.filter(p => p.id !== planId)));
-    return true;
   };
 
   const fetchGroups = async () => {
@@ -1540,7 +1487,7 @@ function useAppController() {
 
     // workout journal
     history, sendToAI, addStructuredWorkout,
-    aiPlans, isGeneratingPlan, generateAiWorkoutPlan, updateAiPlanSet, commitAiWorkoutPlan,
+    isGeneratingPlan, generateAiWorkoutPlan,
 
     // groups / clubs
     groups, activeGroup, setActiveGroup, groupMembers, setGroupMembers, todayWorkouts, setTodayWorkouts,

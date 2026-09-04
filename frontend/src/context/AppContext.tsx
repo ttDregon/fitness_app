@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useMemo 
 import { Platform, Alert, Animated, Easing, LayoutAnimation, ScrollView, Linking, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
-import { getCurrentDateString } from '../utils/date';
+import { getCurrentDateString, ymd } from '../utils/date';
 import { computeNutritionTargets } from '../utils/nutrition';
 import { parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl, notifyUser, generateWorkoutPlan } from '../api/backend';
 import { configureNotificationHandler, registerForPushNotificationsAsync, scheduleLocalReminder, cancelAllScheduled, Notifications } from '../lib/notifications';
@@ -87,6 +87,20 @@ function useAppController() {
   // Незасейвленный конструктор тренировки (экран Личный Журнал) — здесь, а не в самом
   // экране, чтобы список не стирался при переключении вкладок (WorkoutScreen размонтируется).
   const [workoutBlocks, setWorkoutBlocks] = useState<WorkoutBuilderBlock[]>([]);
+
+  // Группировка журнала по дням — тоже здесь, а не useMemo внутри WorkoutScreen: экран
+  // полностью размонтируется на каждое переключение вкладки, так что локальный useMemo
+  // пересчитывался бы заново при КАЖДОМ заходе на вкладку, даже если history не менялась.
+  // Из-за этого переход на Журнал был заметно медленнее остальных вкладок.
+  const journalDayGroups = useMemo(() => {
+    const map = new Map<string, WorkoutData[]>();
+    (history || []).forEach((w: WorkoutRecord) => {
+      const key = ymd(new Date(w.created_at));
+      map.set(key, [...(map.get(key) || []), ...((w.parsed_data) || [])]);
+    });
+    const keys = Array.from(map.keys()).sort();
+    return { keys, map };
+  }, [history]);
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [activeGroup, setActiveGroup] = useState<Group | null>(null);
@@ -1511,7 +1525,7 @@ function useAppController() {
     // workout journal
     history, sendToAI, addStructuredWorkout,
     isGeneratingPlan, generateAiWorkoutPlan, pendingWorkoutPlan, setPendingWorkoutPlan, sendPlanToJournal,
-    workoutBlocks, setWorkoutBlocks,
+    workoutBlocks, setWorkoutBlocks, journalDayGroups,
 
     // groups / clubs
     groups, activeGroup, setActiveGroup, groupMembers, setGroupMembers, todayWorkouts, setTodayWorkouts,

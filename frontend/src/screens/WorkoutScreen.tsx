@@ -10,7 +10,7 @@ import { appAlert } from '../components/AppAlert';
 import { EXERCISES, EXERCISE_GROUPS } from '../data/exercises';
 import type { ExerciseDef } from '../data/exercises';
 import type {
-  WorkoutRecord, GroupedWorkout, WorkoutData, GeneratedWorkoutPlan,
+  GroupedWorkout, WorkoutData, GeneratedWorkoutPlan,
   WorkoutBuilderSet as BSet, WorkoutBuilderBlock as BBlock,
 } from '../types';
 
@@ -82,9 +82,9 @@ const BlockCard = React.memo(function BlockCard({
 
 export default function WorkoutScreen() {
   const {
-    handleTabChange, sendToAI, isLoading, history, addStructuredWorkout,
+    handleTabChange, sendToAI, isLoading, addStructuredWorkout,
     isGeneratingPlan, generateAiWorkoutPlan, pendingWorkoutPlan, setPendingWorkoutPlan,
-    workoutBlocks: blocks, setWorkoutBlocks: setBlocks,
+    workoutBlocks: blocks, setWorkoutBlocks: setBlocks, journalDayGroups: dayGroups,
   } = useApp();
   const [note, setNote] = useState('');
 
@@ -205,16 +205,9 @@ export default function WorkoutScreen() {
     );
   }, [pickerVisible, filterGroup, search]);
 
-  // --- История по дням ---
-  const dayGroups = useMemo(() => {
-    const map = new Map<string, WorkoutData[]>();
-    (history || []).forEach((w: WorkoutRecord) => {
-      const key = ymd(new Date(w.created_at));
-      map.set(key, [...(map.get(key) || []), ...((w.parsed_data) || [])]);
-    });
-    const keys = Array.from(map.keys()).sort();
-    return { keys, map };
-  }, [history]);
+  // --- История по дням --- dayGroups приходит из контекста (journalDayGroups), не
+  // пересчитывается локально: см. AppContext.tsx — экран размонтируется при каждом
+  // переключении вкладки, а history между заходами обычно не меняется.
 
   // Ленивый инициализатор — а не useState(0) + корректирующий useEffect: dayGroups уже
   // посчитан к этому моменту рендера, так что сразу берём последний день. useState(0) с

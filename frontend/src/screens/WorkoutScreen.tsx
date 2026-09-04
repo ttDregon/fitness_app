@@ -216,7 +216,12 @@ export default function WorkoutScreen() {
     return { keys, map };
   }, [history]);
 
-  const [dayIdx, setDayIdx] = useState(0);
+  // Ленивый инициализатор — а не useState(0) + корректирующий useEffect: dayGroups уже
+  // посчитан к этому моменту рендера, так что сразу берём последний день. useState(0) с
+  // догоняющим useEffect на миг показывал САМЫЙ ПЕРВЫЙ день при каждом заходе на вкладку
+  // (эффект срабатывает уже после первого рендера) — раньше это скрывалось за долгим
+  // затемнением при переключении вкладок, сейчас переход быстрее и кадр стал заметен.
+  const [dayIdx, setDayIdx] = useState(() => Math.max(0, dayGroups.keys.length - 1));
   useEffect(() => { setDayIdx(Math.max(0, dayGroups.keys.length - 1)); }, [dayGroups.keys.length]);
 
   const safeIdx = Math.min(Math.max(dayIdx, 0), Math.max(dayGroups.keys.length - 1, 0));

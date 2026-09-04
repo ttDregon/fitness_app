@@ -165,7 +165,12 @@ function useAppController() {
     // Если состоишь ровно в одном клубе — открываем его сразу, без лишнего тапа по карточке.
     if (tabName === 'club' && !activeGroup && groups.length === 1) setActiveGroup(groups[0]);
     contentFadeAnim.setValue(0);
-    Animated.timing(contentFadeAnim, { toValue: 1, duration: 180, useNativeDriver: true }).start();
+    // requestAnimationFrame — не запускаем анимацию в этом же тике: setCurrentTab ещё не
+    // успел отрендериться/смонтироваться, и без этой отсрочки часть длительности анимации
+    // "сгорает" впустую, пока экран монтируется — на глаз это выглядит как отсутствие плавности.
+    requestAnimationFrame(() => {
+      Animated.timing(contentFadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    });
   };
 
   const menuNavigate = (tabName: string) => {

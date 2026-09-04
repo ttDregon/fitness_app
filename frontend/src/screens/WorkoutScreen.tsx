@@ -36,6 +36,50 @@ const buildAiBlocks = (plan: GeneratedWorkoutPlan, existing: Set<string>): BBloc
         .map(s => newSet(s.target_reps != null ? String(s.target_reps) : '', s.target_weight != null ? String(s.target_weight) : '')),
     }));
 
+// Одна карточка блока-упражнения в конструкторе. React.memo — чтобы ввод в одном подходе
+// (или изменение любого другого стейта экрана) не перерисовывал ВСЕ блоки/подходы, когда их
+// много (например, после большого ИИ-плана): перерисуется только тот блок, чьи данные и правда
+// изменились. Все колбэки-пропсы у родителя обёрнуты в useCallback, чтобы это реально работало.
+const BlockCard = React.memo(function BlockCard({
+  block, onRemoveBlock, onAddSet, onRemoveSet, onUpdateSet, onToggleSetDone,
+}: {
+  block: BBlock;
+  onRemoveBlock: (blockId: string) => void;
+  onAddSet: (blockId: string) => void;
+  onRemoveSet: (blockId: string, setId: string) => void;
+  onUpdateSet: (blockId: string, setId: string, field: 'reps' | 'weight', value: string) => void;
+  onToggleSetDone: (blockId: string, setId: string) => void;
+}) {
+  return (
+    <View style={[blockCard, block.source === 'ai' && blockCardAi]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+        <View style={[blockIconWrap, block.source === 'ai' && blockIconWrapAi]}>
+          <Ionicons name={block.source === 'ai' ? 'sparkles' : 'barbell'} size={16} color={block.source === 'ai' ? COLORS.indigo : COLORS.amber} />
+        </View>
+        <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 17, fontWeight: '800' }} numberOfLines={2}>{cap(block.exercise)}</Text>
+        <TouchableOpacity onPress={() => onRemoveBlock(block.id)} style={{ padding: 4 }}><Ionicons name="trash-outline" size={20} color={COLORS.error} /></TouchableOpacity>
+      </View>
+
+      {block.sets.map((s, i) => (
+        <View key={s.id} style={[setRowCard, s.completed && setRowCardDone]}>
+          <View style={[setIndexBadge, s.completed && setIndexBadgeDone]}><Text style={[setIndexText, s.completed && setIndexTextDone]}>{i + 1}</Text></View>
+          <TextInput style={miniInput} keyboardType="numeric" placeholder="повт" placeholderTextColor={COLORS.textMuted} value={s.reps} onChangeText={v => onUpdateSet(block.id, s.id, 'reps', v)} />
+          <TextInput style={miniInput} keyboardType="numeric" placeholder="кг" placeholderTextColor={COLORS.textMuted} value={s.weight} onChangeText={v => onUpdateSet(block.id, s.id, 'weight', v)} />
+          <TouchableOpacity onPress={() => onToggleSetDone(block.id, s.id)} style={{ paddingHorizontal: 8 }}>
+            <Ionicons name={s.completed ? 'checkmark-circle' : 'ellipse-outline'} size={27} color={s.completed ? COLORS.emerald : COLORS.textMuted} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => onRemoveSet(block.id, s.id)}><Ionicons name="close-circle" size={22} color={COLORS.textMuted} /></TouchableOpacity>
+        </View>
+      ))}
+
+      <TouchableOpacity onPress={() => onAddSet(block.id)} style={addSetBtn}>
+        <Ionicons name="add" size={18} color={COLORS.amber} />
+        <Text style={{ color: COLORS.amber, fontWeight: '800', fontSize: 14, marginLeft: 6 }}>Добавить подход</Text>
+      </TouchableOpacity>
+    </View>
+  );
+});
+
 export default function WorkoutScreen() {
   const {
     handleTabChange, sendToAI, isLoading, history, addStructuredWorkout,
@@ -108,31 +152,34 @@ export default function WorkoutScreen() {
     setPickerVisible(false);
   };
 
-  // Операции с блоками/подходами
-  const addSet = (blockId: string) =>
-    setBlocks(prev => prev.map(b => (b.id === blockId ? { ...b, sets: [...b.sets, newSet()] } : b)));
-  const removeSet = (blockId: string, setId: string) =>
+  // Операции с блоками/подходами. useCallback со стабильной ссылкой (весь код использует
+  // функциональную форму setBlocks(prev => ...), внешних зависимостей нет) — нужно, чтобы
+  // BlockCard ниже мог быть React.memo и не перерисовывать ВСЕ блоки на каждый чих (например,
+  // на ввод веса в одном подходе), когда блоков/подходов много (большой ИИ-план и т.п.).
+  const addSet = React.useCallback((blockId: string) =>
+    setBlocks(prev => prev.map(b => (b.id === blockId ? { ...b, sets: [...b.sets, newSet()] } : b))), [setBlocks]);
+  const removeSet = React.useCallback((blockId: string, setId: string) =>
     setBlocks(prev =>
       prev
         .map(b => (b.id === blockId ? { ...b, sets: b.sets.filter(s => s.id !== setId) } : b))
         .filter(b => b.sets.length > 0)
-    );
-  const removeBlock = (blockId: string) => setBlocks(prev => prev.filter(b => b.id !== blockId));
-  const updateSet = (blockId: string, setId: string, field: 'reps' | 'weight', value: string) =>
+    ), [setBlocks]);
+  const removeBlock = React.useCallback((blockId: string) => setBlocks(prev => prev.filter(b => b.id !== blockId)), [setBlocks]);
+  const updateSet = React.useCallback((blockId: string, setId: string, field: 'reps' | 'weight', value: string) =>
     setBlocks(prev =>
       prev.map(b =>
         b.id === blockId
           ? { ...b, sets: b.sets.map(s => (s.id === setId ? { ...s, [field]: value.replace(/[^0-9.]/g, '') } : s)) }
           : b
       )
-    );
+    ), [setBlocks]);
   // Отметка "выполнил этот подход" — только такие подходы уйдут в историю.
-  const toggleSetDone = (blockId: string, setId: string) =>
+  const toggleSetDone = React.useCallback((blockId: string, setId: string) =>
     setBlocks(prev =>
       prev.map(b =>
         b.id === blockId ? { ...b, sets: b.sets.map(s => (s.id === setId ? { ...s, completed: !s.completed } : s)) } : b
       )
-    );
+    ), [setBlocks]);
 
   // Подход считается заполненным, если есть вес ИЛИ повторы (вес 0 — это норм для упражнений с весом тела).
   const isFilled = (s: BSet) => (Number(s.weight) || 0) > 0 || (Number(s.reps) || 0) > 0;
@@ -174,7 +221,7 @@ export default function WorkoutScreen() {
 
   const safeIdx = Math.min(Math.max(dayIdx, 0), Math.max(dayGroups.keys.length - 1, 0));
   const dayKey = dayGroups.keys[safeIdx];
-  const dayData = dayKey ? groupWorkoutData(dayGroups.map.get(dayKey) || []) : [];
+  const dayData = useMemo(() => (dayKey ? groupWorkoutData(dayGroups.map.get(dayKey) || []) : []), [dayKey, dayGroups]);
 
   const dayLabel = (key?: string) => {
     if (!key) return '';
@@ -215,32 +262,11 @@ export default function WorkoutScreen() {
 
       {/* Блоки упражнений (и вручную добавленные, и предложенные ИИ) */}
       {blocks.map(block => (
-        <View key={block.id} style={[blockCard, block.source === 'ai' && blockCardAi]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
-            <View style={[blockIconWrap, block.source === 'ai' && blockIconWrapAi]}>
-              <Ionicons name={block.source === 'ai' ? 'sparkles' : 'barbell'} size={16} color={block.source === 'ai' ? COLORS.indigo : COLORS.amber} />
-            </View>
-            <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 17, fontWeight: '800' }} numberOfLines={2}>{cap(block.exercise)}</Text>
-            <TouchableOpacity onPress={() => removeBlock(block.id)} style={{ padding: 4 }}><Ionicons name="trash-outline" size={20} color={COLORS.error} /></TouchableOpacity>
-          </View>
-
-          {block.sets.map((s, i) => (
-            <View key={s.id} style={[setRowCard, s.completed && setRowCardDone]}>
-              <View style={[setIndexBadge, s.completed && setIndexBadgeDone]}><Text style={[setIndexText, s.completed && setIndexTextDone]}>{i + 1}</Text></View>
-              <TextInput style={miniInput} keyboardType="numeric" placeholder="повт" placeholderTextColor={COLORS.textMuted} value={s.reps} onChangeText={v => updateSet(block.id, s.id, 'reps', v)} />
-              <TextInput style={miniInput} keyboardType="numeric" placeholder="кг" placeholderTextColor={COLORS.textMuted} value={s.weight} onChangeText={v => updateSet(block.id, s.id, 'weight', v)} />
-              <TouchableOpacity onPress={() => toggleSetDone(block.id, s.id)} style={{ paddingHorizontal: 8 }}>
-                <Ionicons name={s.completed ? 'checkmark-circle' : 'ellipse-outline'} size={27} color={s.completed ? COLORS.emerald : COLORS.textMuted} />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => removeSet(block.id, s.id)}><Ionicons name="close-circle" size={22} color={COLORS.textMuted} /></TouchableOpacity>
-            </View>
-          ))}
-
-          <TouchableOpacity onPress={() => addSet(block.id)} style={addSetBtn}>
-            <Ionicons name="add" size={18} color={COLORS.amber} />
-            <Text style={{ color: COLORS.amber, fontWeight: '800', fontSize: 14, marginLeft: 6 }}>Добавить подход</Text>
-          </TouchableOpacity>
-        </View>
+        <BlockCard
+          key={block.id} block={block}
+          onRemoveBlock={removeBlock} onAddSet={addSet} onRemoveSet={removeSet}
+          onUpdateSet={updateSet} onToggleSetDone={toggleSetDone}
+        />
       ))}
 
       {/* Добавить упражнение */}

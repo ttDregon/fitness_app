@@ -147,10 +147,16 @@ export default function WorkoutScreen() {
     if (ok) { setBlocks([]); setDayIdx(Math.max(0, dayGroups.keys.length - 1)); }
   };
 
-  const filtered = EXERCISES.filter(e =>
-    (filterGroup === 'Все' || e.group === filterGroup) &&
-    (search.trim() === '' || e.name.toLowerCase().includes(search.trim().toLowerCase()))
-  );
+  // Список упражнений для модалки выбора — считаем только пока она реально открыта
+  // (Modal в RN монтирует children даже при visible=false) и не на каждый чужой рендер
+  // экрана (например, при наборе веса/повторов в уже добавленных блоках).
+  const filtered = useMemo(() => {
+    if (!pickerVisible) return [];
+    return EXERCISES.filter(e =>
+      (filterGroup === 'Все' || e.group === filterGroup) &&
+      (search.trim() === '' || e.name.toLowerCase().includes(search.trim().toLowerCase()))
+    );
+  }, [pickerVisible, filterGroup, search]);
 
   // --- История по дням ---
   const dayGroups = useMemo(() => {

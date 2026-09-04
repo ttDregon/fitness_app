@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Platform, UIManager, LogBox, ActivityIndicator, Text, TextInput, StatusBar } from 'react-native';
+import * as NavigationBar from 'expo-navigation-bar';
 import { AppProvider, useApp } from './src/context/AppContext';
 import AuthScreen from './src/screens/AuthScreen';
 import MainShell from './src/screens/MainShell';
@@ -11,6 +12,14 @@ import { COLORS } from './src/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// Тёмная нижняя навигационная панель Android, в цвет фона приложения. Раньше это
+// настраивалось статически через app.json (androidNavigationBar), но то поле выпилили —
+// теперь то же самое делается через API expo-navigation-bar при старте.
+if (Platform.OS === 'android') {
+  NavigationBar.setBackgroundColorAsync('#0A0C16').catch(() => {});
+  NavigationBar.setButtonStyleAsync('light').catch(() => {});
 }
 
 // Текст в приложении НЕ должен зависеть от системного размера шрифта.

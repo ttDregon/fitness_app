@@ -4,7 +4,7 @@
     "slug": "my-safe-app",
     "scheme": "mysafeapp",
     "version": "1.0.0",
-    "sdkVersion": "51.0.0",
+    "sdkVersion": "55.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -13,9 +13,6 @@
       "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#0A0C16"
-    },
-    "cli": {
-      "appVersionSource": "remote"
     },
     "ios": {
       "supportsTablet": true,
@@ -28,10 +25,6 @@
       },
       "package": "com.ttdregon.mysafeapp",
       "googleServicesFile": "./google-services.json"
-    },
-    "androidNavigationBar": {
-      "barStyle": "light-content",
-      "backgroundColor": "#0A0C16"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -53,7 +46,7 @@
     "updates": {
       "url": "https://u.expo.dev/a5d7d03d-fbba-4684-bf95-86a9c4faba7b"
     },
-    "runtimeVersion": "1.1.0",
+    "runtimeVersion": "2.0.0",
     "owner": "ttdregon"
   }
 }

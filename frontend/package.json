@@ -3,22 +3,24 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
-    "@expo/vector-icons": "^14.0.2",
-    "@react-native-async-storage/async-storage": "1.23.1",
-    "@react-native-community/datetimepicker": "8.0.1",
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/datetimepicker": "8.6.0",
     "@supabase/supabase-js": "^2.45.4",
-    "expo": "~51.0.0",
-    "expo-constants": "~16.0.0",
-    "expo-dev-client": "~4.0.0",
-    "expo-device": "~6.0.2",
-    "expo-font": "~12.0.0",
-    "expo-notifications": "~0.28.19",
-    "expo-status-bar": "~1.12.0",
-    "expo-updates": "~0.25.28",
-    "react": "18.2.0",
-    "react-native": "0.74.5",
+    "expo": "^55.0.0",
+    "expo-constants": "~55.0.17",
+    "expo-dev-client": "~55.0.40",
+    "expo-device": "~55.0.21",
+    "expo-font": "~55.0.8",
+    "expo-navigation-bar": "~55.0.17",
+    "expo-notifications": "~55.0.27",
+    "expo-status-bar": "~55.0.6",
+    "expo-system-ui": "~55.0.22",
+    "expo-updates": "~55.0.30",
+    "react": "19.2.0",
+    "react-native": "0.83.10",
     "react-native-chart-kit": "^6.12.0",
-    "react-native-svg": "15.2.0"
+    "react-native-svg": "15.15.3"
   },
   "scripts": {
     "start": "expo start",
@@ -28,7 +30,7 @@
   },
   "private": true,
   "devDependencies": {
-    "@types/react": "~19.1.10",
+    "@types/react": "~19.2.10",
     "typescript": "~5.9.2"
   }
 }

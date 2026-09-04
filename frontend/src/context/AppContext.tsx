@@ -154,14 +154,18 @@ function useAppController() {
     animateModalClose(() => setter(false));
   };
 
+  // Раньше тут был двухфазный переход: сначала гасили текущий экран (150мс), потом,
+  // ПОСЛЕ полной смены экрана, проявляли новый (250мс) — итого ~400мс, где заметная часть
+  // уходит на видимое затемнение старого экрана в никуда (пользователь его всё равно не
+  // видит поверх нового) и ощущается как "мерцание перед открытием страницы". Меняем
+  // сразу и просто быстро проявляем новый экран — без предварительного гашения старого.
   const handleTabChange = (tabName: string) => {
     if (tabName === currentTab) return;
-    Animated.timing(contentFadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
-      setCurrentTab(tabName);
-      // Если состоишь ровно в одном клубе — открываем его сразу, без лишнего тапа по карточке.
-      if (tabName === 'club' && !activeGroup && groups.length === 1) setActiveGroup(groups[0]);
-      Animated.timing(contentFadeAnim, { toValue: 1, duration: 250, useNativeDriver: true }).start();
-    });
+    setCurrentTab(tabName);
+    // Если состоишь ровно в одном клубе — открываем его сразу, без лишнего тапа по карточке.
+    if (tabName === 'club' && !activeGroup && groups.length === 1) setActiveGroup(groups[0]);
+    contentFadeAnim.setValue(0);
+    Animated.timing(contentFadeAnim, { toValue: 1, duration: 180, useNativeDriver: true }).start();
   };
 
   const menuNavigate = (tabName: string) => {

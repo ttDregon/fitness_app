@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GradientButton } from '../components/Gradient';
@@ -37,14 +37,22 @@ export default function ChatScreen() {
   // Локальный стейт ввода — чтобы набор текста не перерисовывал весь общий контекст.
   const [chatInput, setChatInput] = useState('');
 
-  // Какие сообщения уже показаны (без повторной анимации). При открытии чата
-  // помечаем всю текущую историю как «показанную» — анимируются только новые ответы ИИ.
-  const seenRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
+  // Какие сообщения уже показаны (без повторной анимации) — анимируется только новый
+  // ответ ИИ, который приходит уже после того, как экран открыт. Это НЕ useEffect
+  // специально: useEffect срабатывает уже после первого рендера, а нам нужно узнать
+  // "какие сообщения уже были" ДО того, как отрисуются TypewriterText с их animate —
+  // иначе при каждом возврате на вкладку чата (экран пересоздаётся) всё успевает на
+  // долю кадра решить "это новое" и переиграть анимацию заново для всей истории.
+  // Здесь используется официально поддерживаемый паттерн React — вызов setState прямо
+  // во время рендера при смене activeChatId (React тут же перерендерит с уже верным
+  // значением, до отрисовки на экране).
+  const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set());
+  const [seenForChatId, setSeenForChatId] = useState<string | null | undefined>(undefined);
+  if (activeChatId !== seenForChatId) {
+    setSeenForChatId(activeChatId);
     const chat = chatSessions.find(c => c.id === activeChatId);
-    seenRef.current = new Set((chat?.messages || []).map(m => m.id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeChatId]);
+    setSeenIds(new Set((chat?.messages || []).map(m => m.id)));
+  }
 
   const renderChatSidebar = () => {
     if (!isChatSidebarVisible) return null;
@@ -125,8 +133,7 @@ export default function ChatScreen() {
                 {msg.sender === 'ai' ? (
                   <TypewriterText
                     text={msg.text}
-                    animate={!seenRef.current.has(msg.id)}
-                    onDone={() => seenRef.current.add(msg.id)}
+                    animate={!seenIds.has(msg.id)}
                     style={[styles.chatText, styles.chatTextAI]}
                   />
                 ) : (

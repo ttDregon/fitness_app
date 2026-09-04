@@ -21,6 +21,12 @@ export interface MealItem { id: string; meal_type?: string; name: string; items?
 export interface AssignedMeal { id?: string; group_id: string; client_id: string; trainer_id: string; date: string; meal_data: MealItem[]; }
 export interface MealLogRow { id: string; user_id: string; date: string; name: string; meal_type?: string; items?: FoodItem[]; calories: number; protein: number; fat: number; carbs: number; source: string; }
 
+// Конструктор тренировки на экране журнала (блоки упражнений с подходами). Стейт живёт
+// в AppContext, а не в самом экране — вкладки в MainShell размонтируют неактивный экран,
+// и локальный useState там стирался бы при каждом переключении вкладки.
+export interface WorkoutBuilderSet { id: string; reps: string; weight: string; completed: boolean; }
+export interface WorkoutBuilderBlock { id: string; exercise: string; sets: WorkoutBuilderSet[]; source: 'manual' | 'ai'; }
+
 // ИИ-план тренировки, как его возвращает бэкенд (ещё ничего не сохранено — только
 // предложение). Экран журнала превращает его в обычные блоки конструктора,
 // которые пользователь подтверждает той же кнопкой "Добавить", что и вручную.

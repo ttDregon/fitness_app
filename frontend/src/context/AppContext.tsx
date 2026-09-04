@@ -10,7 +10,7 @@ import { appAlert } from '../components/AppAlert';
 import type {
   Session, WorkoutData, SavedAccount, Group, GroupMember, WeightLog,
   WorkoutRecord, AssignedWorkout, TrainingSession, ChatMessage, ChatSession, Macros, MealPreview,
-  MealItem, MealLogRow, FoodItem, GeneratedWorkoutPlan,
+  MealItem, MealLogRow, FoodItem, GeneratedWorkoutPlan, WorkoutBuilderBlock,
 } from '../types';
 
 function useAppController() {
@@ -84,6 +84,9 @@ function useAppController() {
   // мгновенно консьюмит его при монтировании и превращает в блоки конструктора — тот же
   // путь, что и для плана из модалки "Сгенерировать план".
   const [pendingWorkoutPlan, setPendingWorkoutPlan] = useState<GeneratedWorkoutPlan | null>(null);
+  // Незасейвленный конструктор тренировки (экран Личный Журнал) — здесь, а не в самом
+  // экране, чтобы список не стирался при переключении вкладок (WorkoutScreen размонтируется).
+  const [workoutBlocks, setWorkoutBlocks] = useState<WorkoutBuilderBlock[]>([]);
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [activeGroup, setActiveGroup] = useState<Group | null>(null);
@@ -691,7 +694,7 @@ function useAppController() {
     setIsAccountSwitcherVisible(false); setIsSideMenuVisible(false); setIsSwitchingAccount(true);
     setAssignNote(''); setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
     setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
-    setTargetWeight(null);
+    setTargetWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
     await supabase.auth.signOut();
     const { data, error } = await supabase.auth.signInWithPassword({ email: account.email, password: account.password });
     if (error) {
@@ -714,7 +717,7 @@ function useAppController() {
       setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
       setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
       setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
-      setTargetWeight(null);
+      setTargetWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
     });
   };
 
@@ -728,7 +731,7 @@ function useAppController() {
       setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setIsSideMenuVisible(false); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
       setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
       setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
-      setTargetWeight(null);
+      setTargetWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
     });
   };
 
@@ -1499,6 +1502,7 @@ function useAppController() {
     // workout journal
     history, sendToAI, addStructuredWorkout,
     isGeneratingPlan, generateAiWorkoutPlan, pendingWorkoutPlan, setPendingWorkoutPlan, sendPlanToJournal,
+    workoutBlocks, setWorkoutBlocks,
 
     // groups / clubs
     groups, activeGroup, setActiveGroup, groupMembers, setGroupMembers, todayWorkouts, setTodayWorkouts,

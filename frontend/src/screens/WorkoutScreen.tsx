@@ -9,13 +9,10 @@ import { useApp } from '../context/AppContext';
 import { appAlert } from '../components/AppAlert';
 import { EXERCISES, EXERCISE_GROUPS } from '../data/exercises';
 import type { ExerciseDef } from '../data/exercises';
-import type { WorkoutRecord, GroupedWorkout, WorkoutData, GeneratedWorkoutPlan } from '../types';
-
-// Подход в конструкторе: и вручную добавленный, и предложенный ИИ — один и тот же тип,
-// отличаются только источником блока (source). Отмечается галочкой "выполнено" и только
-// такие подходы попадают в историю при сохранении.
-interface BSet { id: string; reps: string; weight: string; completed: boolean }
-interface BBlock { id: string; exercise: string; sets: BSet[]; source: 'manual' | 'ai' }
+import type {
+  WorkoutRecord, GroupedWorkout, WorkoutData, GeneratedWorkoutPlan,
+  WorkoutBuilderSet as BSet, WorkoutBuilderBlock as BBlock,
+} from '../types';
 
 const uid = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 const newSet = (reps = '', weight = ''): BSet => ({ id: uid('s'), reps, weight, completed: false });
@@ -43,6 +40,7 @@ export default function WorkoutScreen() {
   const {
     handleTabChange, sendToAI, isLoading, history, addStructuredWorkout,
     isGeneratingPlan, generateAiWorkoutPlan, pendingWorkoutPlan, setPendingWorkoutPlan,
+    workoutBlocks: blocks, setWorkoutBlocks: setBlocks,
   } = useApp();
   const [note, setNote] = useState('');
 
@@ -70,7 +68,8 @@ export default function WorkoutScreen() {
   };
 
   // --- Конструктор тренировки (блоки упражнений с подходами) ---
-  const [blocks, setBlocks] = useState<BBlock[]>([]);
+  // blocks/setBlocks — из контекста (см. useApp() выше), а не локальный useState: экран
+  // размонтируется при переключении вкладок, и локальный стейт стирался бы каждый раз.
 
   // ИИ мог предложить тренировку прямо в обычном чате ("Добавить в тренировку" под
   // сообщением) — она приезжает сюда через контекст и точно так же превращается в блоки.
@@ -82,6 +81,7 @@ export default function WorkoutScreen() {
     });
     setPendingWorkoutPlan(null);
   }, [pendingWorkoutPlan, setPendingWorkoutPlan]);
+
   const [pickerVisible, setPickerVisible] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [search, setSearch] = useState('');

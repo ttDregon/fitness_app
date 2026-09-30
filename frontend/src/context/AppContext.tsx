@@ -752,6 +752,11 @@ function useAppController() {
     setSavedAccounts(updated);
     if (Platform.OS !== 'web') { await AsyncStorage.setItem('savedAccounts', JSON.stringify(updated)); } else { if (typeof window !== 'undefined') window.localStorage.setItem('savedAccounts', JSON.stringify(updated)); }
     await supabase.auth.signOut();
+    clearUserState();
+  };
+
+  // Сброс всего пользовательского стейта после выхода/удаления аккаунта.
+  const clearUserState = () => {
     smoothStateUpdate(() => {
       setGroups([]); setHistory([]); setActiveGroup(null); setGroupMembers([]); setTodayWorkouts([]); setUpcomingSessions([]);
       setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setIsSideMenuVisible(false); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
@@ -1056,7 +1061,8 @@ function useAppController() {
             setSavedAccounts(updated);
             if (Platform.OS !== 'web') { await AsyncStorage.setItem('savedAccounts', JSON.stringify(updated)); } else { if (typeof window !== 'undefined') window.localStorage.setItem('savedAccounts', JSON.stringify(updated)); }
             await supabase.auth.signOut();
-            smoothStateUpdate(() => { setAuthMode('login'); setCurrentTab('home'); setIsSideMenuVisible(false); });
+            // Как при «Выйти»: иначе на экране входа оставались почта и пароль удалённого аккаунта.
+            clearUserState();
           } catch (e) {} finally { setIsLoading(false); }
         }
       }

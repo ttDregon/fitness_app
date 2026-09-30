@@ -205,25 +205,10 @@ function useAppController() {
       const today = getCurrentDateString();
       let lastDate = Platform.OS !== 'web' ? await AsyncStorage.getItem('lastSavedDate') : window.localStorage.getItem('lastSavedDate');
 
-      if (lastDate && lastDate !== today) {
-        let savedNutr = Platform.OS !== 'web' ? await AsyncStorage.getItem(getNutritionKey(lastDate)) : window.localStorage.getItem(getNutritionKey(lastDate));
-        let yesterdayCals = savedNutr ? (JSON.parse(savedNutr).calories || 0) : 0;
-
-        if (dailyCalorieNorm > 0 && currentWeight > 0) {
-          const diff = yesterdayCals - dailyCalorieNorm;
-          const weightChange = diff / 7000.0;
-          let newWeight = parseFloat((currentWeight + weightChange).toFixed(2));
-
-          if (newWeight > 0 && session?.user?.id) {
-            await supabase.from('profiles').update({ weight: newWeight }).eq('id', session.user.id);
-            await supabase.from('weight_log').insert([{ user_id: session.user.id, weight: newWeight }]);
-            const newLog: WeightLog = { id: Date.now().toString(), weight: newWeight, created_at: new Date().toISOString() };
-            setWeightHistoryLogs(prev => [newLog, ...prev]);
-            smoothStateUpdate(() => setCurrentWeight(newWeight));
-            await fetchWeightLog();
-          }
-        }
-      }
+      // Влияние питания на вес считает только settleCalorieWeight (от поддержки, лишь за дни с
+      // записанной едой). Здесь раньше был второй пересчёт — от нормы С УЧЁТОМ цели и даже при
+      // пустом дне, т.е. вес списывался дважды, а без записей еды «худел» на ~0.3 кг за день.
+      if (lastDate && lastDate !== today) settleCalorieWeight();
 
       if (lastDate !== today) {
          if (Platform.OS !== 'web') await AsyncStorage.setItem('lastSavedDate', today);
@@ -654,9 +639,13 @@ function useAppController() {
   // Поддержка = TDEE без коррекции на цель. Двигаем вес только за дни, где еда реально записана.
   // Активность (тренировки) учитывается отдельно — checkPendingWeight через час после тренировки.
   const KCAL_PER_KG = 7700;
+  const settlingRef = useRef(false); // запуск на старте и смена дня могут совпасть — не считать дважды
   const settleCalorieWeight = async () => {
-    if (!session?.user?.id) return;
-    const uid = session.user.id;
+    if (!session?.user?.id || settlingRef.current) return;
+    settlingRef.current = true;
+    try { await settleCalorieWeightOnce(session.user.id); } finally { settlingRef.current = false; }
+  };
+  const settleCalorieWeightOnce = async (uid: string) => {
     const today = getCurrentDateString();
     const settleKey = `weightSettle_${uid}`;
     const readKV = async (k: string) => Platform.OS !== 'web' ? await AsyncStorage.getItem(k) : (typeof window !== 'undefined' ? window.localStorage.getItem(k) : null);

@@ -3,7 +3,7 @@
     "name": "Striva",
     "slug": "my-safe-app",
     "scheme": "mysafeapp",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "sdkVersion": "55.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

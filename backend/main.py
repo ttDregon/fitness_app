@@ -648,6 +648,8 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
     api_messages = [{"role": "system", "content": system_prompt}]
     
     for msg in req.messages:
+        if msg.role not in ("user", "assistant"):
+            continue  # "system" из тела запроса подменил бы наш системный промпт
         if msg.role == "assistant":
             simulated_json = json.dumps({"reply": msg.content, "calories": 0, "protein": 0, "fat": 0, "carbs": 0})
             api_messages.append({"role": "assistant", "content": simulated_json})
@@ -674,12 +676,19 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
         if not (isinstance(workout_plan, dict) and isinstance(workout_plan.get("exercises"), list) and workout_plan.get("exercises")):
             workout_plan = None
 
+        # Приложение записывает в дневник всё, где calories > 0. ИИ иногда заполняет КБЖУ и на
+        # вопрос («сколько калорий в пицце?»), ставя should_log_meal: false — такое обнуляем,
+        # а записываемое прогоняем через те же пределы/сверку, что и /parse_meals.
+        food = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
+        if str(parsed_reply.get("should_log_meal", True)).lower() != "false":
+            try:
+                food = _clamp_food_item({k: parsed_reply.get(k) for k in food})
+            except (TypeError, ValueError):
+                pass
+
         return {
             "reply": parsed_reply.get("reply", "Ошибка формата"),
-            "calories": parsed_reply.get("calories", 0),
-            "protein": parsed_reply.get("protein", 0),
-            "fat": parsed_reply.get("fat", 0),
-            "carbs": parsed_reply.get("carbs", 0),
+            **food,
             "workout_plan": workout_plan,
         }
     except Exception as e:

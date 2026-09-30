@@ -3,7 +3,7 @@
     "name": "Striva",
     "slug": "my-safe-app",
     "scheme": "mysafeapp",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "sdkVersion": "55.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -44,7 +44,10 @@
       }
     },
     "updates": {
-      "url": "https://u.expo.dev/a5d7d03d-fbba-4684-bf95-86a9c4faba7b"
+      "url": "https://u.expo.dev/a5d7d03d-fbba-4684-bf95-86a9c4faba7b",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
     },
     "runtimeVersion": "2.0.0",
     "owner": "ttdregon"

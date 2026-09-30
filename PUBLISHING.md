@@ -118,6 +118,26 @@ eas submit --profile production --platform android
 Google обычно проверяет релиз от нескольких часов до пары дней (у уже одобренного
 разработчика — как правило быстрее, чем самый первый релиз).
 
+### 2.2б Локальная сборка `.aab` (без EAS, заливка руками в Play Console)
+
+Так собраны версии, которые реально стоят в Play (1.0.0/versionCode 1 и 1.0.1/versionCode 2).
+
+```bash
+cd frontend
+npx expo prebuild --platform android --no-install   # БЕЗ --clean: снесёт android/keystore.properties
+# в android/app/build.gradle поднять versionCode (должен быть больше, чем в Play)
+cd android && ./gradlew bundleRelease
+# готовый файл: android/app/build/outputs/bundle/release/app-release.aab
+```
+
+**Важно про OTA (`eas update`)**: сборка получает обновления, только если в неё зашит канал
+(`expo-channel-name`). EAS Build делает это сам по `channel` из `eas.json`, а локальная —
+только из `updates.requestHeaders` в `app.json`. В 1.0.0 этого не было, поэтому она
+обновления не получала вообще (сервер отвечает 400). С 1.0.1 канал `production` прописан в
+`app.json`, так что `eas update --branch production` доходит и до локальных сборок.
+Проверка после сборки: в `android/app/src/main/AndroidManifest.xml` должна быть строка
+`UPDATES_CONFIGURATION_REQUEST_HEADERS_KEY` с `production`.
+
 ### 2.3 Что использовать по умолчанию
 
 Если сомневаешься — начни с **2.1 (`eas update`)**. Это буквально то же самое, что

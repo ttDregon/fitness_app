@@ -11,13 +11,13 @@ import { useApp } from '../context/AppContext';
 const PRIVACY_POLICY_URL = 'https://claude.ai/code/artifact/af27e39b-05d2-4b94-b0ea-87bc46f4aae8';
 
 export default function SettingsScreen() {
-  const { menuNavigate, handleDeleteAccount } = useApp();
+  const { handleTabChange, handleDeleteAccount } = useApp();
 
   return (
     <View style={styles.mainContent}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => menuNavigate('home')} style={{padding: 5}}><Ionicons name="arrow-back" size={32} color={COLORS.textPrimary} /></TouchableOpacity>
+        <TouchableOpacity onPress={() => handleTabChange('profile')} style={{padding: 5}}><Ionicons name="arrow-back" size={32} color={COLORS.textPrimary} /></TouchableOpacity>
         <Text style={[styles.pageTitle, {flex: 1, textAlign: 'center', marginRight: 42}]}>Настройки</Text>
       </View>
 

@@ -67,7 +67,7 @@ export default function ChatScreen() {
 
               <Text style={styles.sidebarSectionTitle}>Чаты</Text>
               <ScrollView showsVerticalScrollIndicator={false}>
-                {chatSessions.sort((a,b) => b.updatedAt - a.updatedAt).map(chat => (
+                {[...chatSessions].sort((a,b) => b.updatedAt - a.updatedAt).map(chat => (
                    <View key={chat.id} style={[styles.chatSidebarItem, activeChatId === chat.id && styles.chatSidebarItemActive]}>
                       <TouchableOpacity style={{flex: 1, flexDirection: 'row', alignItems: 'center'}} onPress={() => { smoothStateUpdate(() => { setActiveChatId(chat.id); setIsChatSidebarVisible(false); }); }}>
                          <Ionicons name="chatbubble-outline" size={20} color={COLORS.chatSidebarText} style={{marginRight: 12}} />
@@ -169,7 +169,7 @@ export default function ChatScreen() {
       )}
 
       <View style={styles.chatInputRow}>
-        <TextInput style={styles.chatInput} placeholder="Запитайте AI..." placeholderTextColor={COLORS.textSecondary} value={chatInput} onChangeText={setChatInput} multiline />
+        <TextInput style={styles.chatInput} placeholder="Спроси ИИ..." placeholderTextColor={COLORS.textSecondary} value={chatInput} onChangeText={setChatInput} multiline />
         <GradientButton colors={GRADIENTS.indigo} style={styles.chatSendBtn} onPress={() => { handleSendChatMessage(chatInput); setChatInput(''); }} disabled={isChatLoading}><Ionicons name="send" size={22} color="#fff" /></GradientButton>
       </View>
     </View>

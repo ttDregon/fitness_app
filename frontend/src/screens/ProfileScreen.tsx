@@ -4,10 +4,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { styles } from '../styles';
 import { COLORS } from '../theme';
 import { useApp } from '../context/AppContext';
+import { goalProgressPct } from '../utils/goal';
 
 export default function ProfileScreen() {
   const {
-    displayName, userRole, userGoal, currentWeight, targetWeight, weightHistoryLogs, waterIntake,
+    displayName, userRole, userGoal, currentWeight, targetWeight, startWeight, waterIntake,
     handleTabChange, openAnimatedModal, setIsAccountSwitcherVisible, handleSignOut, handleDeleteAccount,
   } = useApp();
 
@@ -15,11 +16,9 @@ export default function ProfileScreen() {
   const goalLabel = goalMap[userGoal] || 'Не указана';
   const cw = currentWeight || 0;
   const tw = targetWeight;
-  const startW = weightHistoryLogs.length > 0 ? (weightHistoryLogs[weightHistoryLogs.length - 1]?.weight || cw) : cw;
+  const startW = startWeight || cw;
   const hasTarget = tw && tw > 0;
-  const total = hasTarget ? Math.abs(startW - tw) : 0;
-  const done = hasTarget ? Math.abs(startW - cw) : 0;
-  const pct = total > 0 ? Math.min(Math.round(done / total * 100), 100) : 0;
+  const pct = hasTarget ? goalProgressPct(startW, cw, tw) : 0;
 
   const rowBtn = { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: COLORS.card, borderRadius: 16, padding: 18, marginBottom: 14 };
 
@@ -72,6 +71,13 @@ export default function ProfileScreen() {
         <TouchableOpacity style={rowBtn} onPress={() => openAnimatedModal(setIsAccountSwitcherVisible)}>
           <Ionicons name="swap-horizontal-outline" size={24} color={COLORS.textPrimary} style={{ marginRight: 14 }} />
           <Text style={{ color: COLORS.textPrimary, fontSize: 16, fontWeight: '600' }}>Сменить аккаунт</Text>
+        </TouchableOpacity>
+
+        {/* Единственный вход в «Настройки» — там политика конфиденциальности (Play требует,
+            чтобы она открывалась из приложения); раньше на этот экран не вела ни одна кнопка. */}
+        <TouchableOpacity style={rowBtn} onPress={() => handleTabChange('settings')}>
+          <Ionicons name="settings-outline" size={24} color={COLORS.textPrimary} style={{ marginRight: 14 }} />
+          <Text style={{ color: COLORS.textPrimary, fontSize: 16, fontWeight: '600' }}>Настройки и конфиденциальность</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={rowBtn} onPress={handleSignOut}>

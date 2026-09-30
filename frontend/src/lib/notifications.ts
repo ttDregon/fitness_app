@@ -64,10 +64,13 @@ export const scheduleLocalReminder = async (
 ) => {
   if (date.getTime() <= Date.now()) return;
   try {
+    await ensureAndroidChannel();
+    // С SDK 52 триггер без `type` отклоняется (TypeError) — раньше из-за `{ date }` ни одно
+    // напоминание не ставилось, а ошибку глушил catch ниже.
     await Notifications.scheduleNotificationAsync({
       identifier,
       content: { title, body, data, sound: true },
-      trigger: { date } as any,
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date, channelId: 'default' },
     });
   } catch {}
 };

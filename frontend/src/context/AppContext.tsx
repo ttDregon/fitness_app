@@ -43,6 +43,9 @@ function useAppController() {
 
   const [currentWeight, setCurrentWeight] = useState<number>(0);
   const [targetWeight, setTargetWeight] = useState<number | null>(null);
+  // Самая первая запись веса (точка «Старт» для прогресса к цели). weightHistoryLogs для этого
+  // не годится: там только выбранный на графике период (по умолчанию месяц).
+  const [startWeight, setStartWeight] = useState<number | null>(null);
 
   const targetWeightRef = useRef<number | null>(null);
   useEffect(() => { targetWeightRef.current = targetWeight; }, [targetWeight]);
@@ -215,6 +218,7 @@ function useAppController() {
          else window.localStorage.setItem('lastSavedDate', today);
          loadTodayNutritionData();
          loadTodayWater();
+         loadClientNutrition(); // меню тренера и «я ел сегодня» тоже за новый день
       }
     } catch (e) { console.log("Midnight update error", e); }
   };
@@ -371,9 +375,14 @@ function useAppController() {
     }
   }, [chartPeriod]);
 
+  // Эффект ниже перезапускается при смене currentWeight — в том числе от собственного
+  // setCurrentWeight, пока ещё идёт запрос. Без флага второй проход находил те же
+  // pendingExercises (их удаляли только в самом конце) и списывал вес повторно.
+  const pendingWeightBusyRef = useRef(false);
   useEffect(() => {
     const checkPendingWeight = async () => {
-      if (!session || !session.user || currentWeight <= 0) return;
+      if (!session || !session.user || currentWeight <= 0 || pendingWeightBusyRef.current) return;
+      pendingWeightBusyRef.current = true;
       try {
         let timeStr = null;
         if (Platform.OS !== 'web') { timeStr = await AsyncStorage.getItem('lastActivityTime'); } else { timeStr = typeof window !== 'undefined' ? window.localStorage.getItem('lastActivityTime') : null; }
@@ -383,6 +392,9 @@ function useAppController() {
         if (Date.now() - lastTime >= 3600000) {
           let savedPending = null;
           if (Platform.OS !== 'web') { savedPending = await AsyncStorage.getItem('pendingExercises'); } else { savedPending = typeof window !== 'undefined' ? window.localStorage.getItem('pendingExercises') : null; }
+          // Сначала «забираем» подходы из хранилища, потом считаем — повторно их уже не посчитать.
+          if (Platform.OS !== 'web') { await AsyncStorage.removeItem('pendingExercises'); await AsyncStorage.removeItem('lastActivityTime'); } else { if (typeof window !== 'undefined') { window.localStorage.removeItem('pendingExercises'); window.localStorage.removeItem('lastActivityTime'); } }
+          setPendingExerciseCount(0); setLastActivityTime(null);
 
           if (savedPending) {
             const pending = JSON.parse(savedPending);
@@ -404,10 +416,8 @@ function useAppController() {
               } catch(e) {}
             }
           }
-          if (Platform.OS !== 'web') { await AsyncStorage.removeItem('pendingExercises'); await AsyncStorage.removeItem('lastActivityTime'); } else { if (typeof window !== 'undefined') { window.localStorage.removeItem('pendingExercises'); window.localStorage.removeItem('lastActivityTime'); } }
-          setPendingExerciseCount(0); setLastActivityTime(null);
         }
-      } catch (e) {}
+      } catch (e) {} finally { pendingWeightBusyRef.current = false; }
     };
     const interval = setInterval(checkPendingWeight, 30000);
     checkPendingWeight(); return () => clearInterval(interval);
@@ -474,7 +484,11 @@ function useAppController() {
 
   const fetchUserProfileData = async () => {
     if (!session?.user) return;
-    const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+    const [{ data }, { data: first }] = await Promise.all([
+      supabase.from('profiles').select('*').eq('id', session.user.id).single(),
+      supabase.from('weight_log').select('weight').eq('user_id', session.user.id).order('created_at', { ascending: true }).limit(1),
+    ]);
+    setStartWeight(first?.[0]?.weight ?? null);
     if (data) {
       smoothStateUpdate(() => {
         setCurrentWeight(data.weight || 0);
@@ -706,7 +720,7 @@ function useAppController() {
     setIsAccountSwitcherVisible(false); setIsSideMenuVisible(false); setIsSwitchingAccount(true);
     setAssignNote(''); setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
     setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
-    setTargetWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
+    setTargetWeight(null); setStartWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
     await supabase.auth.signOut();
     const { data, error } = await supabase.auth.signInWithPassword({ email: account.email, password: account.password });
     if (error) {
@@ -729,7 +743,7 @@ function useAppController() {
       setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
       setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
       setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
-      setTargetWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
+      setTargetWeight(null); setStartWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
     });
   };
 
@@ -743,7 +757,7 @@ function useAppController() {
       setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setIsSideMenuVisible(false); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
       setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
       setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
-      setTargetWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
+      setTargetWeight(null); setStartWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
     });
   };
 
@@ -795,7 +809,8 @@ function useAppController() {
       // который при перезаходе обновляется на тик позже — иначе у тренера запросится
       // фильтр по client_id и календарь оказывается пустым.
       const role = session?.user?.user_metadata?.role || userRole;
-      let query = supabase.from('training_sessions').select('*').order('session_date', { ascending: true }).order('session_time', { ascending: true });
+      // Только сегодня и дальше: иначе прошедшие записи копятся в «Календаре записей» бесконечно.
+      let query = supabase.from('training_sessions').select('*').gte('session_date', getCurrentDateString()).order('session_date', { ascending: true }).order('session_time', { ascending: true });
       if (role === 'trainer') query = query.eq('trainer_id', session?.user?.id); else query = query.eq('client_id', session?.user?.id);
       const { data: sessions, error } = await query;
       if (error || !sessions) { setUpcomingSessions([]); return; }
@@ -1085,7 +1100,16 @@ function useAppController() {
         await supabase.from('profiles').insert([profilePayload]);
         await supabase.from('weight_log').insert([{ user_id: authData.user.id, weight: fullWeight }]);
         await saveAccountToLocal(authData.user, password);
-        smoothStateUpdate(() => { setCurrentWeight(fullWeight); setUserGoal(goal || 'maintain'); setTargetWeight(finalTargetWeight); });
+        // Норму считаем здесь же: загрузка профиля при появлении сессии стартует параллельно с
+        // insert выше и находит пустой профиль — без этого новичок видел «0 / --- ккал» до перезапуска.
+        const t = computeNutritionTargets({
+          weight: fullWeight, height: fullHeight, age: userAge, gender: userGender,
+          workoutsPerWeek: workoutsPerWeek || null, goal: goal || null,
+        });
+        smoothStateUpdate(() => {
+          setCurrentWeight(fullWeight); setStartWeight(fullWeight); setUserGoal(goal || 'maintain'); setTargetWeight(finalTargetWeight);
+          setMaintenanceCalories(t.maintenanceCalories); setDailyCalorieNorm(t.dailyCalorieNorm); setDailyMacros(t.macros);
+        });
       }
     } catch (error: unknown) { appAlert('Ошибка регистрации', (error as any)?.message || 'Unknown error'); } finally { setIsLoadingAuth(false); }
   };
@@ -1188,6 +1212,15 @@ function useAppController() {
     setMealParse(null);
   };
 
+  // Что ответ чата записал в дневник. Числа приводим явно: строка "330" от ИИ склеилась бы
+  // с суммой ("1200" + "330" = "1200330").
+  const chatNutrition = (data: any): ChatMessage['logged'] => {
+    const n = (v: any) => Math.max(0, Math.round(Number(v) || 0));
+    const calories = n(data?.calories);
+    if (calories <= 0) return undefined;
+    return { date: getCurrentDateString(), calories, protein: n(data.protein), fat: n(data.fat), carbs: n(data.carbs) };
+  };
+
   const createNewChat = () => { smoothStateUpdate(() => { setActiveChatId(null); setIsChatSidebarVisible(false); }); };
 
   const deleteChat = (id: string) => {
@@ -1213,6 +1246,17 @@ function useAppController() {
     if (msgIndex === -1) return;
 
     const updatedMessages = [...chat.messages.slice(0, msgIndex), { ...chat.messages[msgIndex], text: editInput.trim() }];
+    // Ответы после правленного сообщения удаляются — откатываем еду, которую они записали сегодня,
+    // иначе «я съел 200г курицы» → правка на 150г записывало курицу второй раз.
+    const today = getCurrentDateString();
+    const undone = chat.messages.slice(msgIndex + 1).reduce((a, m) => (m.logged && m.logged.date === today)
+      ? { c: a.c + m.logged.calories, p: a.p + m.logged.protein, f: a.f + m.logged.fat, cb: a.cb + m.logged.carbs } : a,
+      { c: 0, p: 0, f: 0, cb: 0 });
+    const base = {
+      c: Math.max(0, consumedCalories - undone.c), p: Math.max(0, consumedMacros.protein - undone.p),
+      f: Math.max(0, consumedMacros.fat - undone.f), cb: Math.max(0, consumedMacros.carb - undone.cb),
+    };
+    if (undone.c > 0) saveNutritionDataLocally(base.c, base.p, base.f, base.cb);
     smoothStateUpdate(() => {
       setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: updatedMessages, updatedAt: Date.now() } : c));
       setEditingMessageId(null);
@@ -1229,14 +1273,13 @@ function useAppController() {
         return;
       }
 
-      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai', workoutPlan: data.workout_plan || undefined };
+      const logged = chatNutrition(data);
+      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai', workoutPlan: data.workout_plan || undefined, logged };
       smoothStateUpdate(() => {
         setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, aiMsg], updatedAt: Date.now() } : c));
       });
 
-      if (data.calories && data.calories > 0) {
-        saveNutritionDataLocally( consumedCalories + data.calories, consumedMacros.protein + (data.protein || 0), consumedMacros.fat + (data.fat || 0), consumedMacros.carb + (data.carbs || 0) );
-      }
+      if (logged) saveNutritionDataLocally(base.c + logged.calories, base.p + logged.protein, base.f + logged.fat, base.cb + logged.carbs);
     } catch (error) {
       const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "Не удалось связаться с ИИ. Проверьте интернет и попробуйте ещё раз.", sender: 'ai' };
       smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, errorMsg], updatedAt: Date.now() } : c)));
@@ -1279,12 +1322,11 @@ function useAppController() {
         return;
       }
 
-      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai', workoutPlan: data.workout_plan || undefined };
+      const logged = chatNutrition(data);
+      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai', workoutPlan: data.workout_plan || undefined, logged };
       smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, aiMsg], updatedAt: Date.now() } : c)));
 
-      if (data.calories && data.calories > 0) {
-        saveNutritionDataLocally( consumedCalories + data.calories, consumedMacros.protein + (data.protein || 0), consumedMacros.fat + (data.fat || 0), consumedMacros.carb + (data.carbs || 0) );
-      }
+      if (logged) saveNutritionDataLocally(consumedCalories + logged.calories, consumedMacros.protein + logged.protein, consumedMacros.fat + logged.fat, consumedMacros.carb + logged.carbs);
     } catch (error) {
       const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "Не удалось связаться с ИИ. Проверьте интернет и попробуйте ещё раз.", sender: 'ai' };
       smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, errorMsg], updatedAt: Date.now() } : c)));
@@ -1498,7 +1540,7 @@ function useAppController() {
     contentFadeAnim, modalOpacityAnim, modalScaleAnim,
 
     // weight / home
-    currentWeight, targetWeight, weightHistoryLogs,
+    currentWeight, targetWeight, startWeight, weightHistoryLogs,
     isWeightModalVisible, setIsWeightModalVisible,
     manualWeightWhole, setManualWeightWhole, manualWeightDec, setManualWeightDec,
     chartPeriod, setChartPeriod, chartDataMemo, handleManualWeightUpdate,

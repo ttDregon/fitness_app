@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { parseMeals, notifyUser } from '../api/backend';
 import { groupWorkoutData } from '../utils/workout';
 import { getCurrentDateString } from '../utils/date';
+import { goalProgressPct } from '../utils/goal';
 import { useApp } from '../context/AppContext';
 import { appAlert } from '../components/AppAlert';
 import type { WorkoutData, GroupedWorkout, MealItem, MealLogRow, FoodItem } from '../types';
@@ -346,9 +347,7 @@ export default function ClientPlanModal() {
               const tw = clientProfile.target_weight;
               const startW = clientProfile.startWeight || cw;
               const hasTarget = tw && tw > 0;
-              const total = hasTarget ? Math.abs(startW - tw) : 0;
-              const done = hasTarget ? Math.abs(startW - cw) : 0;
-              const pct = total > 0 ? Math.min(Math.round(done / total * 100), 100) : 0;
+              const pct = hasTarget ? goalProgressPct(startW, cw, tw) : 0;
               return (
                 <View style={{ backgroundColor: COLORS.cardAlt, borderRadius: 18, padding: 18, marginTop: 12, marginBottom: 20, borderWidth: 1, borderColor: COLORS.borderSoft }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: hasTarget ? 14 : 4 }}>

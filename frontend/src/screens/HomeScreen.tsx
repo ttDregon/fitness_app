@@ -6,6 +6,7 @@ import { LineChart } from 'react-native-chart-kit';
 import { ScrollPicker } from '../components/ScrollPicker';
 import { GradientButton, GradientView } from '../components/Gradient';
 import { weightWholeData, decimalsData } from '../utils/pickers';
+import { goalProgressPct } from '../utils/goal';
 import { styles } from '../styles';
 import { COLORS, GRADIENTS, screenWidth } from '../theme';
 import { useApp } from '../context/AppContext';
@@ -15,7 +16,7 @@ export default function HomeScreen() {
   const {
     displayName, userRole, openAnimatedModal, handleTabChange, setIsScheduleListVisible, menuNavigate,
     consumedCalories, dailyCalorieNorm, maintenanceCalories, currentWeight, setIsWeightModalVisible, waterIntake, addWater, resetWater,
-    isWeightModalVisible, modalOpacityAnim, modalScaleAnim, closeAnimatedModal, userGoal, targetWeight,
+    isWeightModalVisible, modalOpacityAnim, modalScaleAnim, closeAnimatedModal, userGoal, targetWeight, startWeight,
     weightHistoryLogs, manualWeightWhole, setManualWeightWhole, manualWeightDec, setManualWeightDec,
     handleManualWeightUpdate, isLoading, isScheduleListVisible, startScheduling, isSchedulingVisible,
     scheduleStep, groups, selectGroupForSchedule, groupMembers, schedSelectedMember, setSchedSelectedMember,
@@ -201,7 +202,7 @@ export default function HomeScreen() {
     }, {});
     return Object.keys(grouped).sort().map((dateStr: string) => (
       <View key={dateStr} style={styles.dateGroup}>
-        <View style={styles.dateHeaderRow}><Ionicons name="calendar" size={20} color={COLORS.tabBar} style={{marginRight: 10}} /><Text style={styles.dateHeaderText}>{new Date(dateStr).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'long' })}</Text></View>
+        <View style={styles.dateHeaderRow}><Ionicons name="calendar" size={20} color={COLORS.tabBar} style={{marginRight: 10}} /><Text style={styles.dateHeaderText}>{new Date(dateStr + 'T12:00:00').toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'long' })}</Text></View>
         {grouped[dateStr].map((sess: TrainingSession) => (
           <View key={sess.id} style={styles.sessionCard}>
             <View style={styles.sessionTimeBadge}><Text style={styles.sessionTimeText}>{sess.session_time}</Text></View>
@@ -299,11 +300,8 @@ export default function HomeScreen() {
                       Поддержка ≈ {maintenanceCalories} ккал/день{'\n'}вес авто-досчитывается по итогам дня (питание) и через час после тренировки
                     </Text>
                   )}
-                  {targetWeight && targetWeight > 0 && weightHistoryLogs.length > 0 && (() => {
-                    const startW = weightHistoryLogs[weightHistoryLogs.length - 1]?.weight || currentWeight;
-                    const total = Math.abs(startW - targetWeight);
-                    const done  = Math.abs(startW - currentWeight);
-                    const pct   = total > 0 ? Math.min(Math.round(done / total * 100), 100) : 0;
+                  {targetWeight && targetWeight > 0 && currentWeight > 0 && (() => {
+                    const pct = goalProgressPct(startWeight || currentWeight, currentWeight, targetWeight);
                     return (
                       <View style={{ width: '100%', marginTop: 18 }}>
                         <View style={styles.wmProgressBg}>

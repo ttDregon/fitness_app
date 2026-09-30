@@ -169,7 +169,9 @@ export default function WorkoutScreen() {
     setBlocks(prev =>
       prev.map(b =>
         b.id === blockId
-          ? { ...b, sets: b.sets.map(s => (s.id === setId ? { ...s, [field]: value.replace(/[^0-9.]/g, '') } : s)) }
+          // Запятая → точка: русская цифровая клавиатура даёт «52,5», и раньше запятая просто
+          // вырезалась — получалось 525 кг.
+          ? { ...b, sets: b.sets.map(s => (s.id === setId ? { ...s, [field]: value.replace(/,/g, '.').replace(/[^0-9.]/g, '') } : s)) }
           : b
       )
     ), [setBlocks]);

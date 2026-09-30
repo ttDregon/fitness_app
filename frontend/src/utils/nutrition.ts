@@ -22,7 +22,20 @@ export interface NutritionTargets {
   macros: { protein: number; fat: number; carb: number };
 }
 
-const ACTIVITY_MULT: Record<string, number> = { '1-2': 1.375, '3-4': 1.55, '5+': 1.725 };
+// Множители активности к BMR. Раньше стояли классические 1.375/1.55/1.725 — они описывают
+// ОБРАЗ ЖИЗНИ целиком («умеренно активный» = работа на ногах + спорт 3–5 раз), а мы знаем
+// только число тренировок в неделю, при том что у большинства сидячая работа. Плюс основной
+// сценарий приложения — силовые, они сжигают меньше, чем кардио из исходных таблиц.
+// Итог — поддержка завышалась на ~7–10%. Без тренировок остаётся «сидячий» 1.2.
+const ACTIVITY_MULT: Record<string, number> = { '1-2': 1.3, '3-4': 1.45, '5+': 1.6 };
+
+// Коррекция на цель — в процентах от поддержки, а не плоские ±500: для лёгкого человека
+// −500 это почти треть рациона, а +500 при наборе даёт в основном жир.
+const LOSE_DEFICIT = 0.2;     // дефицит 20%...
+const LOSE_DEFICIT_MAX = 500; // ...но не больше 500 ккал (~0.5 кг/нед)
+const GAIN_SURPLUS = 0.1;     // профицит 10% (~+250 ккал) — «чистый» набор
+// Нижняя граница при похудении без врача (общепринятая: 1200 ж / 1500 м).
+const MIN_CALORIES: Record<string, number> = { male: 1500, female: 1200 };
 
 // Белок, г/кг веса тела, по цели — в пределах безопасного диапазона 1.6–2.2 г/кг.
 const PROTEIN_G_PER_KG: Record<string, number> = { lose: 2.0, gain: 1.9, maintain: 1.6 };
@@ -36,8 +49,14 @@ export function computeNutritionTargets(p: NutritionInputs): NutritionTargets {
   const maintenanceCalories = Math.round(bmr * mult);
 
   let cals = maintenanceCalories;
-  if (p.goal === 'lose') cals -= 500;
-  else if (p.goal === 'gain') cals += 500;
+  if (p.goal === 'lose') {
+    cals -= Math.min(LOSE_DEFICIT_MAX, maintenanceCalories * LOSE_DEFICIT);
+    // не ниже безопасного минимума, но и не выше самой поддержки (у миниатюрных людей она < минимума)
+    const floor = MIN_CALORIES[p.gender] ?? MIN_CALORIES.female;
+    cals = Math.max(cals, Math.min(floor, maintenanceCalories));
+  } else if (p.goal === 'gain') {
+    cals += maintenanceCalories * GAIN_SURPLUS;
+  }
   cals = Math.round(cals);
 
   const gPerKg = PROTEIN_G_PER_KG[p.goal || 'maintain'] ?? 1.6;

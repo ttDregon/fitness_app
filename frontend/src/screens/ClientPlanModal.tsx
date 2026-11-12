@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView,
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { GradientButton } from '../components/Gradient';
+import { KeyboardAvoid } from '../components/KeyboardAvoid';
 import { styles } from '../styles';
 import { COLORS, GRADIENTS } from '../theme';
 import { supabase } from '../lib/supabase';
@@ -48,6 +49,7 @@ export default function ClientPlanModal() {
     clientProfile, activeGroup, session,
     assignNote, setAssignNote, assignWorkoutDate, setAssignWorkoutDate, assignDateObj, setAssignDateObj,
     assignDatePickerVisible, setAssignDatePickerVisible, onAssignDateChange, assignWorkoutToMember, isLoading, memberDayPlan,
+    removeAssignedExercises,
   } = useApp();
 
   // Сдвиг даты тренировки стрелками (меняет дату → контекст подгружает план на неё).
@@ -163,6 +165,7 @@ export default function ClientPlanModal() {
   return (
     <Modal transparent animationType="none" onRequestClose={close}>
       <Animated.View style={[styles.modalOverlayFull, { opacity: modalOpacityAnim }]}>
+       <KeyboardAvoid>
         <Animated.View style={[styles.modalContentFull, { transform: [{ scale: modalScaleAnim }] }]}>
           <View style={styles.modalHeaderFull}>
             <Text style={styles.modalTitleFull}>План: {selectedMember?.name || selectedMember?.email?.split('@')[0]}</Text>
@@ -171,7 +174,7 @@ export default function ClientPlanModal() {
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={{ width: '100%', marginTop: 10 }} showsVerticalScrollIndicator={false}>
+          <ScrollView style={{ width: '100%', marginTop: 10 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {/* ===== Кнопка ТРЕНИРОВКА ===== */}
             <TouchableOpacity style={sectionBtn(activeSection === 'workout', COLORS.violet)} onPress={() => setActiveSection(s => s === 'workout' ? null : 'workout')}>
               <Ionicons name="barbell" size={24} color="#fff" style={{ marginRight: 12 }} />
@@ -201,11 +204,26 @@ export default function ClientPlanModal() {
                   if (!plan || !Array.isArray(plan.workout_data) || !plan.workout_data.length) return <Text style={styles.placeholderText}>План не назначен</Text>;
                   return groupWorkoutData(plan.workout_data).map((group: GroupedWorkout, gIdx: number) => (
                     <View key={gIdx} style={{ marginBottom: 20, backgroundColor: COLORS.cardAlt, padding: 15, borderRadius: 16, borderWidth: 1, borderColor: COLORS.borderSoft }}>
-                      <Text style={styles.groupExerciseTitle}>{group.exercise}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={[styles.groupExerciseTitle, { flex: 1 }]}>{group.exercise}</Text>
+                        <TouchableOpacity
+                          onPress={() => appAlert('Убрать упражнение?', `${group.exercise} — все подходы будут удалены из плана клиента.`, [
+                            { text: 'Отмена', style: 'cancel' },
+                            { text: 'Убрать', style: 'destructive', onPress: () => removeAssignedExercises(group.sets.map(x => x.id || '').filter(Boolean)) },
+                          ])}
+                          style={{ padding: 4, marginBottom: 8 }} accessibilityLabel="Убрать упражнение из плана">
+                          <Ionicons name="trash-outline" size={20} color={COLORS.error} />
+                        </TouchableOpacity>
+                      </View>
                       {group.sets.map((ex: WorkoutData, idx: number) => (
-                        <View key={idx} style={[styles.setRow, { paddingVertical: 10, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)', paddingLeft: 5 }]}>
+                        <View key={ex.id || idx} style={[styles.setRow, { paddingVertical: 10, borderBottomWidth: 1, borderColor: 'rgba(255,255,255,0.05)', paddingLeft: 5 }]}>
                           <Text style={[styles.exerciseSetText, ex.completed && { textDecorationLine: 'line-through', color: COLORS.textSecondary }]}>Подход {idx + 1}: {ex.weight}кг x {ex.reps}</Text>
                           <Ionicons name={ex.completed ? 'checkmark-circle' : 'ellipse-outline'} size={28} color={ex.completed ? COLORS.success : COLORS.textSecondary} />
+                          {!!ex.id && (
+                            <TouchableOpacity onPress={() => removeAssignedExercises([ex.id!])} style={{ paddingLeft: 10 }} accessibilityLabel="Убрать подход">
+                              <Ionicons name="close-circle" size={22} color={COLORS.textMuted} />
+                            </TouchableOpacity>
+                          )}
                         </View>
                       ))}
                     </View>
@@ -383,6 +401,7 @@ export default function ClientPlanModal() {
             })()}
           </ScrollView>
         </Animated.View>
+       </KeyboardAvoid>
       </Animated.View>
     </Modal>
   );

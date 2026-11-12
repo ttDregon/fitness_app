@@ -1,17 +1,33 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
-import { Platform, Alert, Animated, Easing, LayoutAnimation, ScrollView, Linking, AppState } from 'react-native';
+import { Platform, Animated, Easing, LayoutAnimation, ScrollView, Linking } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isAuthApiError } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { getCurrentDateString, ymd } from '../utils/date';
+import { kvGet, kvSet, kvRemove, kvGetJSON, kvSetJSON } from '../lib/storage';
+import { getCurrentDateString, ymd, plural } from '../utils/date';
 import { computeNutritionTargets } from '../utils/nutrition';
-import { parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl, notifyUser, generateWorkoutPlan } from '../api/backend';
-import { configureNotificationHandler, registerForPushNotificationsAsync, scheduleLocalReminder, cancelAllScheduled, Notifications } from '../lib/notifications';
+import { computeExerciseStats, computeWorkoutSummary } from '../utils/stats';
+import { buildCompanionContext } from '../utils/companion';
+import { translateAuthError, isValidEmail } from '../utils/authErrors';
+import {
+  parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl, notifyUser, generateWorkoutPlan,
+  fetchCompanionBrief, type CompanionPersona,
+} from '../api/backend';
+import {
+  configureNotificationHandler, registerForPushNotificationsAsync, scheduleLocalReminder,
+  cancelScheduledByPrefix, cancelScheduled, Notifications,
+} from '../lib/notifications';
 import { appAlert } from '../components/AppAlert';
 import type {
   Session, WorkoutData, SavedAccount, Group, GroupMember, WeightLog,
-  WorkoutRecord, AssignedWorkout, TrainingSession, ChatMessage, ChatSession, Macros, MealPreview,
-  MealItem, MealLogRow, FoodItem, GeneratedWorkoutPlan, WorkoutBuilderBlock,
+  WorkoutRecord, AssignedWorkout, TrainingSession, ChatMessage, ChatSession, Macros,
+  MealItem, MealLogRow, FoodItem, GeneratedWorkoutPlan, WorkoutBuilderBlock, JournalSet,
 } from '../types';
+
+// Совет компаньона на день (карточка на главном). Кэшируется в хранилище на дату.
+export interface CompanionBrief { date: string; headline: string; message: string; suggestion: string }
+
+const REST_TIMER_ID = 'rest_timer';
 
 function useAppController() {
   const [session, setSession] = useState<Session | null>(null);
@@ -73,6 +89,12 @@ function useAppController() {
   const [assignedMealsToday, setAssignedMealsToday] = useState<MealItem[]>([]); // меню от тренера на сегодня (вид клиента)
   const [selfMealsToday, setSelfMealsToday] = useState<MealLogRow[]>([]);       // что клиент записал сам за сегодня
   const [mealParse, setMealParse] = useState<MealItem[] | null>(null); // распарсенные приёмы для предпросмотра (клиент)
+  // Актуальные значения для асинхронных действий (ответ ИИ приходит через секунды — замыкание
+  // к этому времени уже устарело, и запись «съел яблоко» затёрла бы только что добавленное).
+  const selfMealsRef = useRef<MealLogRow[]>([]);
+  const assignedMealsRef = useRef<MealItem[]>([]);
+  useEffect(() => { selfMealsRef.current = selfMealsToday; }, [selfMealsToday]);
+  useEffect(() => { assignedMealsRef.current = assignedMealsToday; }, [assignedMealsToday]);
 
   const [lastActivityTime, setLastActivityTime] = useState<number | null>(null);
   const [pendingExerciseCount, setPendingExerciseCount] = useState<number>(0);
@@ -81,6 +103,8 @@ function useAppController() {
   const [currentTab, setCurrentTab] = useState<string>('home');
   const [isSideMenuVisible, setIsSideMenuVisible] = useState<boolean>(false);
   const [waterIntake, setWaterIntake] = useState<number>(0);
+  const waterRef = useRef<number>(0);
+  useEffect(() => { waterRef.current = waterIntake; }, [waterIntake]);
   const [history, setHistory] = useState<WorkoutRecord[]>([]);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
   // План, предложенный ИИ прямо в обычном чате (см. workout_plan в /chat). Экран журнала
@@ -91,19 +115,45 @@ function useAppController() {
   // экране, чтобы список не стирался при переключении вкладок (WorkoutScreen размонтируется).
   const [workoutBlocks, setWorkoutBlocks] = useState<WorkoutBuilderBlock[]>([]);
 
+  // Таймер отдыха между подходами: момент окончания (ms) — в контексте, чтобы пережить
+  // переключение вкладок. Плюс локальное уведомление на это время (телефон часто
+  // блокируют во время отдыха).
+  const [restEndsAt, setRestEndsAt] = useState<number | null>(null);
+  const [restDuration, setRestDuration] = useState<number>(90);
+
+  // «Добавить аккаунт»: показываем экран входа, НЕ выходя из текущего аккаунта (выход
+  // отозвал бы его сессию, и переключиться обратно без пароля было бы нельзя).
+  const [isAddingAccount, setIsAddingAccount] = useState(false);
+
+  // ИИ-компаньон: характер (хранится на устройстве) и совет дня для главного экрана.
+  const [companionPersona, setCompanionPersonaState] = useState<CompanionPersona>('friendly');
+  const [companionBrief, setCompanionBrief] = useState<CompanionBrief | null>(null);
+  const [isBriefLoading, setIsBriefLoading] = useState(false);
+  // Вес за последние ~60 дней для контекста компаньона (weightHistoryLogs — только период графика).
+  const [recentWeightLogs, setRecentWeightLogs] = useState<WeightLog[]>([]);
+
   // Группировка журнала по дням — тоже здесь, а не useMemo внутри WorkoutScreen: экран
   // полностью размонтируется на каждое переключение вкладки, так что локальный useMemo
   // пересчитывался бы заново при КАЖДОМ заходе на вкладку, даже если history не менялась.
   // Из-за этого переход на Журнал был заметно медленнее остальных вкладок.
+  // Каждый подход помнит, из какой строки workouts (_rid) и с какой позиции (_idx) он
+  // пришёл — нужно для удаления ошибочно записанных подходов из истории.
   const journalDayGroups = useMemo(() => {
-    const map = new Map<string, WorkoutData[]>();
-    (history || []).forEach((w: WorkoutRecord) => {
+    const map = new Map<string, JournalSet[]>();
+    // history приходит от новых к старым — внутри дня собираем в хронологическом порядке.
+    [...(history || [])].reverse().forEach((w: WorkoutRecord) => {
       const key = ymd(new Date(w.created_at));
-      map.set(key, [...(map.get(key) || []), ...((w.parsed_data) || [])]);
+      const sets = (Array.isArray(w.parsed_data) ? w.parsed_data : []).map((s, i) => ({ ...s, _rid: w.id, _idx: i }));
+      map.set(key, [...(map.get(key) || []), ...sets]);
     });
-    const keys = Array.from(map.keys()).sort();
+    const keys = Array.from(map.keys()).filter(k => (map.get(k) || []).length > 0).sort();
     return { keys, map };
   }, [history]);
+
+  // Рекорды/«прошлый раз» по упражнениям и недельная сводка — для экрана статистики,
+  // подсказок в конструкторе и контекста ИИ-компаньона.
+  const exerciseStats = useMemo(() => computeExerciseStats(journalDayGroups), [journalDayGroups]);
+  const workoutSummary = useMemo(() => computeWorkoutSummary(journalDayGroups), [journalDayGroups]);
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [activeGroup, setActiveGroup] = useState<Group | null>(null);
@@ -216,20 +266,22 @@ function useAppController() {
       if (lastDate !== today) {
          if (Platform.OS !== 'web') await AsyncStorage.setItem('lastSavedDate', today);
          else window.localStorage.setItem('lastSavedDate', today);
-         loadTodayNutritionData();
+         refreshTodayNutrition(); // итоги КБЖУ, меню тренера и «я ел сегодня» — за новый день
          loadTodayWater();
-         loadClientNutrition(); // меню тренера и «я ел сегодня» тоже за новый день
+         setCompanionBrief(prev => (prev && prev.date !== today ? null : prev)); // вчерашний совет устарел
       }
     } catch (e) { console.log("Midnight update error", e); }
   };
 
+  // Раньше проверка смены дня запускалась только при уже посчитанной норме калорий и весе >0:
+  // без полного профиля питание и вода так и оставались «вчерашними» до перезапуска.
   useEffect(() => {
-    if (dailyCalorieNorm > 0 && currentWeight > 0 && session) {
+    if (session) {
       performMidnightUpdate();
       const interval = setInterval(performMidnightUpdate, 60000);
       return () => clearInterval(interval);
     }
-  }, [dailyCalorieNorm, currentWeight, session]);
+  }, [session]);
 
   // Прогрев бэкенда при запуске: Render на бесплатном тарифе засыпает после простоя и просыпается
   // 30–60 сек. Будим его фоновым запросом сразу, чтобы к моменту чата/парсинга он уже был готов.
@@ -238,30 +290,29 @@ function useAppController() {
   }, []);
 
   useEffect(() => {
-    const loadSavedAccounts = async () => {
-      try {
-        if (Platform.OS !== 'web') {
-          const saved = await AsyncStorage.getItem('savedAccounts');
-          if (saved) setSavedAccounts(JSON.parse(saved));
-        } else {
-          if (typeof window !== 'undefined') {
-            const saved = window.localStorage.getItem('savedAccounts');
-            if (saved) setSavedAccounts(JSON.parse(saved));
-          }
-        }
-      } catch (e) {}
-    };
-    loadSavedAccounts();
+    kvGetJSON<SavedAccount[]>('savedAccounts', []).then(list => setSavedAccounts(Array.isArray(list) ? list : []));
+    kvGet('companionPersona').then(p => { if (p === 'friendly' || p === 'strict' || p === 'calm') setCompanionPersonaState(p); });
     supabase.auth.getSession().then(({ data: { session } }) => {
+      activeUidRef.current = session?.user?.id || null;
       setSession(session);
       if (session?.user?.user_metadata?.role) setUserRole(session.user.user_metadata.role);
+      // Миграция со старых версий: у активного аккаунта есть живая сессия — сразу меняем
+      // сохранённый пароль на refresh-токен.
+      if (session) rememberAccountSession(session);
     }).finally(() => setAuthReady(true));
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      activeUidRef.current = session?.user?.id || null;
       setSession(session);
       if (session?.user?.user_metadata?.role) setUserRole(session.user.user_metadata.role);
     });
     return () => authListener.subscription.unsubscribe();
   }, []);
+
+  // Кто залогинен ПРЯМО СЕЙЧАС. Загрузки асинхронные: ответ, запрошенный ещё для прежнего
+  // аккаунта, может прийти уже после переключения — такие ответы отбрасываем (isStale), иначе
+  // история/вес/питание одного аккаунта «протекали» в другой.
+  const activeUidRef = useRef<string | null>(null);
+  const isStale = (uid?: string | null) => !uid || uid !== activeUidRef.current;
 
   // Грузим историю чатов один раз на пользователя (по user.id, а НЕ по объекту session —
   // иначе обновление токена меняет session и перечитывает хранилище, затирая свежий чат).
@@ -312,6 +363,16 @@ function useAppController() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [upcomingSessions]);
 
+  // Сменился пользователь (переключение/добавление аккаунта) → сначала стираем данные
+  // прежнего, потом грузим нового. Раньше сброс был вручную в каждом месте смены аккаунта и
+  // кое-что «протекало» (например, незаконченный конструктор тренировки переезжал в чужой аккаунт).
+  const lastUidRef = useRef<string | null>(null);
+  useEffect(() => {
+    const uid = session?.user?.id || null;
+    if (lastUidRef.current && uid && lastUidRef.current !== uid) resetUserScopedState();
+    if (uid) lastUidRef.current = uid;
+  }, [session?.user?.id]);
+
   useEffect(() => {
     if (!session) return; // нет сессии → экран входа; bootReady не нужен
     let cancelled = false;
@@ -336,7 +397,8 @@ function useAppController() {
     (async () => {
       const tasks = [
         loadHistory(), fetchGroups(), fetchUpcomingSessions(), fetchUserProfileData(),
-        fetchWeightLog(), loadTodayNutritionData(), loadClientNutrition(), loadTodayWater(),
+        fetchWeightLog(), refreshTodayNutrition(), loadTodayWater(), fetchRecentWeights(),
+        loadCachedBrief(),
       ];
       await Promise.race([
         Promise.allSettled(tasks),
@@ -423,62 +485,138 @@ function useAppController() {
     checkPendingWeight(); return () => clearInterval(interval);
   }, [session, currentWeight, userGoal]);
 
-  const loadTodayNutritionData = async () => {
-    try {
-      const key = getNutritionKey();
-      let saved = Platform.OS !== 'web' ? await AsyncStorage.getItem(key) : typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        smoothStateUpdate(() => {
-          setConsumedCalories(parsed.calories || 0);
-          setConsumedMacros({ protein: parsed.protein || 0, fat: parsed.fat || 0, carb: parsed.carbs || 0 });
-        });
-      } else {
-        smoothStateUpdate(() => {
-          setConsumedCalories(0);
-          setConsumedMacros({ protein: 0, fat: 0, carb: 0 });
-        });
-      }
-    } catch (e) {}
+  // ===================== ПИТАНИЕ =====================
+  // Итоги дня считаются из БАЗЫ: Σ meal_log за сегодня (самозапись + еда из чата) + съеденные
+  // блюда из меню тренера. Раньше итоги жили только в AsyncStorage — после переустановки или
+  // на втором телефоне «съедено» обнулялось, еду из чата не видел тренер, и ошибочно
+  // записанное блюдо было нельзя удалить. Локальная копия осталась как кэш: офлайн-фолбэк
+  // и источник для settleCalorieWeight (вчерашние калории → вес).
+  type Totals = { c: number; p: number; f: number; cb: number };
+  const ZERO: Totals = { c: 0, p: 0, f: 0, cb: 0 };
+  const sumMeals = (rows: { calories: number; protein: number; fat: number; carbs: number }[]): Totals =>
+    rows.reduce((a, m) => ({ c: a.c + (Number(m.calories) || 0), p: a.p + (Number(m.protein) || 0), f: a.f + (Number(m.fat) || 0), cb: a.cb + (Number(m.carbs) || 0) }), ZERO);
+  const addT = (a: Totals, b: Totals): Totals => ({ c: a.c + b.c, p: a.p + b.p, f: a.f + b.f, cb: a.cb + b.cb });
+  const subT = (a: Totals, b: Totals): Totals => ({ c: Math.max(0, a.c - b.c), p: Math.max(0, a.p - b.p), f: Math.max(0, a.f - b.f), cb: Math.max(0, a.cb - b.cb) });
+
+  // «Добавка» за сегодня, которой нет в базе: еда, записанная старой версией приложения до
+  // обновления (только локально), и записи, которые не удалось отправить без сети.
+  const extraKey = (date = getCurrentDateString()) => `nutritionExtra_${session?.user?.id || 'guest'}_${date}`;
+  // Ключ кэша включает и пользователя, и дату — смена аккаунта или дня перечитывает хранилище.
+  const nutritionExtraRef = useRef<{ key: string; t: Totals }>({ key: '', t: ZERO });
+  const getExtra = async (): Promise<Totals> => {
+    const key = extraKey();
+    if (nutritionExtraRef.current.key !== key) {
+      nutritionExtraRef.current = { key, t: await kvGetJSON<Totals>(key, ZERO) };
+    }
+    return nutritionExtraRef.current.t;
+  };
+  const setExtra = async (t: Totals) => {
+    const key = extraKey();
+    nutritionExtraRef.current = { key, t };
+    await kvSetJSON(key, t);
   };
 
-  const saveNutritionDataLocally = async (cals: number, p: number, f: number, c: number) => {
+  const applyTotals = (t: Totals) => {
+    const r = { c: Math.round(t.c), p: Math.round(t.p), f: Math.round(t.f), cb: Math.round(t.cb) };
     smoothStateUpdate(() => {
-      setConsumedCalories(cals);
-      setConsumedMacros({ protein: p, fat: f, carb: c });
+      setConsumedCalories(r.c);
+      setConsumedMacros({ protein: r.p, fat: r.f, carb: r.cb });
     });
-    const key = getNutritionKey();
-    const val = JSON.stringify({ calories: cals, protein: p, fat: f, carbs: c });
-    if (Platform.OS !== 'web') await AsyncStorage.setItem(key, val);
-    else if (typeof window !== 'undefined') window.localStorage.setItem(key, val);
+    kvSetJSON(getNutritionKey(), { calories: r.c, protein: r.p, fat: r.f, carbs: r.cb });
   };
 
-  // Питание клиента из БД: меню от тренера на сегодня (assigned_meals) + что он записал сам (meal_log).
-  const loadClientNutrition = async () => {
-    if (!session?.user?.id) return;
+  const recomputeTotals = async (assigned: MealItem[], self: MealLogRow[]) => {
+    const extra = await getExtra();
+    applyTotals(addT(addT(sumMeals(self), sumMeals(assigned.filter(m => m.eaten))), extra));
+  };
+
+  // Офлайн-фолбэк: последние известные итоги из кэша.
+  const loadTodayNutritionData = async () => {
+    const saved = await kvGetJSON<any>(getNutritionKey(), null);
+    applyTotals(saved ? { c: saved.calories || 0, p: saved.protein || 0, f: saved.fat || 0, cb: saved.carbs || 0 } : ZERO);
+  };
+
+  // Питание из БД: меню от тренера на сегодня (assigned_meals) + что записано самим (meal_log).
+  const refreshTodayNutrition = async () => {
+    const uid = session?.user?.id;
+    if (!uid) return;
     const today = getCurrentDateString();
-    const { data: am } = await supabase.from('assigned_meals').select('meal_data').eq('client_id', session.user.id).eq('date', today).maybeSingle();
-    setAssignedMealsToday((am?.meal_data as MealItem[]) || []);
-    const { data: ml } = await supabase.from('meal_log').select('*').eq('user_id', session.user.id).eq('date', today).order('created_at', { ascending: true });
-    setSelfMealsToday((ml as MealLogRow[]) || []);
+    const [amRes, mlRes] = await Promise.all([
+      supabase.from('assigned_meals').select('meal_data').eq('client_id', uid).eq('date', today).maybeSingle(),
+      supabase.from('meal_log').select('*').eq('user_id', uid).eq('date', today).order('created_at', { ascending: true }),
+    ]);
+    if (isStale(uid)) return;
+    if (amRes.error || mlRes.error) { await loadTodayNutritionData(); return; } // нет сети — показываем кэш
+    const assigned = (amRes.data?.meal_data as MealItem[]) || [];
+    const self = (mlRes.data as MealLogRow[]) || [];
+
+    // Первый запуск после обновления: в локальных итогах может быть еда из чата, которой нет
+    // в базе. Переносим разницу в «добавку» на сегодня, чтобы съеденное не «пропало».
+    const migratedKey = `nutritionDbSource_${uid}`;
+    if (!(await kvGet(migratedKey))) {
+      const local = await kvGetJSON<any>(getNutritionKey(), null);
+      if (local) {
+        const db = addT(sumMeals(self), sumMeals(assigned.filter(m => m.eaten)));
+        await setExtra(subT({ c: local.calories || 0, p: local.protein || 0, f: local.fat || 0, cb: local.carbs || 0 }, db));
+      }
+      await kvSet(migratedKey, today);
+    }
+
+    setAssignedMealsToday(assigned); assignedMealsRef.current = assigned;
+    setSelfMealsToday(self); selfMealsRef.current = self;
+    await recomputeTotals(assigned, self);
+  };
+  // Старое имя — экраны зовут его при открытии.
+  const loadClientNutrition = refreshTodayNutrition;
+
+  // Запись еды в meal_log. Если не получилось (нет сети) — учитываем хотя бы локально.
+  const insertMealRows = async (rows: Omit<MealLogRow, 'id' | 'user_id' | 'date'>[]): Promise<MealLogRow[]> => {
+    const uid = session?.user?.id;
+    if (!uid || rows.length === 0) return [];
+    const date = getCurrentDateString();
+    const { data, error } = await supabase.from('meal_log').insert(rows.map(r => ({ ...r, user_id: uid, date }))).select();
+    if (error || !data) {
+      const added = sumMeals(rows);
+      await setExtra(addT(await getExtra(), added));
+      const cached = await kvGetJSON<any>(getNutritionKey(), null);
+      applyTotals(addT(cached ? { c: cached.calories || 0, p: cached.protein || 0, f: cached.fat || 0, cb: cached.carbs || 0 } : ZERO, added));
+      return [];
+    }
+    const inserted = data as MealLogRow[];
+    const next = [...selfMealsRef.current, ...inserted];
+    smoothStateUpdate(() => setSelfMealsToday(next));
+    selfMealsRef.current = next;
+    await recomputeTotals(assignedMealsRef.current, next);
+    return inserted;
+  };
+
+  // Удалить ошибочно записанное блюдо из «Я ел сегодня».
+  const deleteSelfMeal = (id: string) => {
+    const row = selfMealsRef.current.find(m => m.id === id);
+    if (!row) return;
+    appAlert('Удалить запись?', `${row.name || 'Блюдо'} · ${row.calories} ккал`, [
+      { text: 'Отмена', style: 'cancel' },
+      { text: 'Удалить', style: 'destructive', onPress: async () => {
+        const next = selfMealsRef.current.filter(m => m.id !== id);
+        smoothStateUpdate(() => setSelfMealsToday(next));
+        selfMealsRef.current = next;
+        await recomputeTotals(assignedMealsRef.current, next);
+        const { error } = await supabase.from('meal_log').delete().eq('id', id);
+        if (error) { appAlert('Ошибка', 'Не удалось удалить запись. Проверьте подключение.'); refreshTodayNutrition(); }
+      } },
+    ]);
   };
 
   // Клиент отмечает блюдо из плана как съеденное: пишем eaten в assigned_meals (видит тренер)
-  // и двигаем дневные итоги КБЖУ на величину блюда.
+  // и пересчитываем дневные итоги КБЖУ.
   const toggleAssignedMealEaten = async (mealId: string) => {
     if (!session?.user?.id) return;
-    const target = assignedMealsToday.find(m => m.id === mealId);
+    const target = assignedMealsRef.current.find(m => m.id === mealId);
     if (!target) return;
-    const nowEaten = !target.eaten;
-    const updated = assignedMealsToday.map(m => m.id === mealId ? { ...m, eaten: nowEaten } : m);
+    const updated = assignedMealsRef.current.map(m => m.id === mealId ? { ...m, eaten: !target.eaten } : m);
     setAssignedMealsToday(updated);
-    const sign = nowEaten ? 1 : -1;
-    saveNutritionDataLocally(
-      Math.max(0, consumedCalories + sign * target.calories),
-      Math.max(0, consumedMacros.protein + sign * target.protein),
-      Math.max(0, consumedMacros.fat + sign * target.fat),
-      Math.max(0, consumedMacros.carb + sign * target.carbs)
-    );
+    assignedMealsRef.current = updated;
+    await recomputeTotals(updated, selfMealsRef.current);
     await supabase.from('assigned_meals').update({ meal_data: updated }).eq('client_id', session.user.id).eq('date', getCurrentDateString());
   };
 
@@ -488,6 +626,7 @@ function useAppController() {
       supabase.from('profiles').select('*').eq('id', session.user.id).single(),
       supabase.from('weight_log').select('weight').eq('user_id', session.user.id).order('created_at', { ascending: true }).limit(1),
     ]);
+    if (isStale(session.user.id)) return;
     setStartWeight(first?.[0]?.weight ?? null);
     if (data) {
       smoothStateUpdate(() => {
@@ -569,6 +708,7 @@ function useAppController() {
     query = query.limit(limit);
 
     const { data, error } = await query;
+    if (isStale(session.user.id)) return;
     if (data && data.length > 0) {
       setWeightHistoryLogs(data as WeightLog[]);
       saveWeightLogLocally(data as WeightLog[]);
@@ -578,10 +718,27 @@ function useAppController() {
     }
   };
 
+  // Вес за ~60 дней — для контекста ИИ-компаньона (динамика за неделю/месяц).
+  const fetchRecentWeights = async () => {
+    if (!session?.user?.id) return;
+    const since = new Date(); since.setDate(since.getDate() - 60);
+    const { data } = await supabase.from('weight_log').select('id, weight, created_at')
+      .eq('user_id', session.user.id).gte('created_at', since.toISOString())
+      .order('created_at', { ascending: true }).limit(200);
+    if (isStale(session.user.id)) return;
+    if (data) setRecentWeightLogs(data as WeightLog[]);
+  };
+
   const handleManualWeightUpdate = async () => {
     const weightNum = parseFloat(`${manualWeightWhole}.${manualWeightDec}`);
-    if (isNaN(weightNum) || weightNum <= 0) return;
+    await recordWeight(weightNum);
+  };
+
+  // Записать вес (модалка «Вес» и действие ИИ-компаньона «я вешу 82.5»).
+  const recordWeight = async (weightNum: number): Promise<boolean> => {
+    if (isNaN(weightNum) || weightNum <= 0) return false;
     setIsLoading(true);
+    let ok = true;
 
     try {
       if (!session?.user?.id) throw new Error('No user session');
@@ -615,7 +772,8 @@ function useAppController() {
         if (weightResult.error) throw weightResult.error;
         await Promise.all([
           fetchWeightLog(),
-          fetchUserProfileData()
+          fetchUserProfileData(),
+          fetchRecentWeights(),
         ]);
       }
 
@@ -623,12 +781,14 @@ function useAppController() {
       const err = e as unknown as Record<string, any>;
       if (err?.code === '42501') {
       } else {
+        ok = false;
         console.error('Weight update error:', err);
         appAlert('Ошибка', 'Не удалось сохранить вес. Проверьте подключение.');
       }
     } finally {
       setIsLoading(false);
     }
+    return ok;
   };
 
   const registerActivityForWeightLoss = async (exercisesArray: WorkoutData[], isAdding: boolean) => {
@@ -702,72 +862,148 @@ function useAppController() {
     } catch (e) {}
   };
 
-  const saveAccountToLocal = async (userObj: any, pass: string) => {
+  // ===================== СОХРАНЁННЫЕ АККАУНТЫ =====================
+  // Быстрое переключение без пароля: для каждого аккаунта храним refresh-токен его сессии
+  // (supabase.auth.refreshSession({ refresh_token }) — штатный способ multi-account). Раньше
+  // в AsyncStorage лежал пароль открытым текстом, а переключение начиналось с signOut(),
+  // который отзывал сессию на сервере.
+  const persistAccounts = async (accounts: SavedAccount[]) => {
+    setSavedAccounts(accounts);
+    await kvSetJSON('savedAccounts', accounts);
+  };
+
+  // Запомнить (или обновить) аккаунт по его живой сессии. Пароль, если остался от старой
+  // версии, при этом стирается.
+  const rememberAccountSession = async (sess: Session, extra?: { name?: string; role?: string }) => {
+    const u = sess.user;
+    if (!u?.id) return;
+    const accounts = await kvGetJSON<SavedAccount[]>('savedAccounts', []);
+    const prev = accounts.find(a => a.id === u.id);
+    const acc: SavedAccount = {
+      id: u.id,
+      email: u.email || prev?.email || '',
+      name: u.user_metadata?.name || extra?.name || prev?.name || (u.email || '').split('@')[0],
+      role: u.user_metadata?.role || extra?.role || prev?.role || '',
+      refreshToken: sess.refresh_token,
+    };
+    const next = prev ? accounts.map(a => (a.id === u.id ? acc : a)) : [...accounts, acc];
+    await persistAccounts(next);
+  };
+
+  // Перед уходом из аккаунта (переключение/добавление) запоминаем его актуальный refresh-токен.
+  // Если access-токен вот-вот истечёт, сначала обновляем сами — иначе фоновый автоапдейт мог
+  // бы «перевыпустить» токен уже после снимка, и сохранённый стал бы недействительным.
+  const snapshotCurrentAccount = async () => {
     try {
-      let savedStr = null;
-      if (Platform.OS !== 'web') { savedStr = await AsyncStorage.getItem('savedAccounts'); } else { savedStr = typeof window !== 'undefined' ? window.localStorage.getItem('savedAccounts') : null; }
-      let accounts: SavedAccount[] = savedStr ? JSON.parse(savedStr) : [];
-      const existingIndex = accounts.findIndex((a: SavedAccount) => a.id === userObj.id);
-      const accData: SavedAccount = { id: userObj.id, email: userObj.email, name: userObj.user_metadata?.name || name || userObj.email.split('@')[0], role: userObj.user_metadata?.role || userRole || '', password: pass };
-      if (existingIndex >= 0) accounts[existingIndex] = accData; else accounts.push(accData);
-      setSavedAccounts(accounts);
-      if (Platform.OS !== 'web') { await AsyncStorage.setItem('savedAccounts', JSON.stringify(accounts)); } else { if (typeof window !== 'undefined') window.localStorage.setItem('savedAccounts', JSON.stringify(accounts)); }
-    } catch (e) {}
+      let sess = (await supabase.auth.getSession()).data.session;
+      if (sess?.expires_at && sess.expires_at * 1000 - Date.now() < 5 * 60 * 1000) {
+        sess = (await supabase.auth.refreshSession()).data.session || sess;
+      }
+      if (sess) await rememberAccountSession(sess);
+    } catch {}
   };
 
   const handleSwitchAccount = async (account: SavedAccount) => {
     if (session?.user?.id === account.id) { setIsAccountSwitcherVisible(false); return; }
-    setIsAccountSwitcherVisible(false); setIsSideMenuVisible(false); setIsSwitchingAccount(true);
-    setAssignNote(''); setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
-    setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
-    setTargetWeight(null); setStartWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
-    await supabase.auth.signOut();
-    const { data, error } = await supabase.auth.signInWithPassword({ email: account.email, password: account.password });
-    if (error) {
-      appAlert("Ошибка", "Пароль был изменен. Войдите заново.");
-      const updated = savedAccounts.filter((a: SavedAccount) => a.id !== account.id);
-      setSavedAccounts(updated);
-      if (Platform.OS !== 'web') { await AsyncStorage.setItem('savedAccounts', JSON.stringify(updated)); } else { if (typeof window !== 'undefined') window.localStorage.setItem('savedAccounts', JSON.stringify(updated)); }
-      setIsSwitchingAccount(false);
-    } else if (data?.session) {
-      setSession(data.session);
-      if (data.session.user?.user_metadata?.role) setUserRole(data.session.user.user_metadata.role);
-      setTimeout(() => { setIsSwitchingAccount(false); }, 300);
+    setIsAccountSwitcherVisible(false); setIsSideMenuVisible(false);
+    if (!account.refreshToken && !account.password) { promptReLogin(account); return; }
+    setIsSwitchingAccount(true);
+    try {
+      await snapshotCurrentAccount();
+      let next: Session | null = null;
+      if (account.refreshToken) {
+        const { data, error } = await supabase.auth.refreshSession({ refresh_token: account.refreshToken });
+        if (!error) next = data.session;
+        // Сервер явно отверг токен (отозван/использован) — тогда он мёртв. Всё остальное
+        // (нет сети, таймаут, 5xx) — временный сбой: токен НЕ трогаем, просим повторить.
+        else if (!(isAuthApiError(error) && error.status >= 400 && error.status < 500)) throw error;
+      }
+      // Запись старой версии с паролем: входим им один раз и сразу меняем пароль на токен.
+      // ВАЖНО: без signOut — он отозвал бы сессию текущего аккаунта.
+      if (!next && account.password) {
+        const { data, error } = await supabase.auth.signInWithPassword({ email: account.email, password: account.password });
+        if (!error) next = data.session;
+      }
+      if (!next) {
+        // Токен отозван (выход на другом устройстве, смена пароля) — забываем его и просим войти.
+        await persistAccounts((await kvGetJSON<SavedAccount[]>('savedAccounts', [])).map(a =>
+          a.id === account.id ? { id: a.id, email: a.email, name: a.name, role: a.role } : a));
+        setIsSwitchingAccount(false);
+        promptReLogin(account);
+        return;
+      }
+      await rememberAccountSession(next);
+      activeUidRef.current = next.user?.id || null;
+      setSession(next);
+      if (next.user?.user_metadata?.role) setUserRole(next.user.user_metadata.role);
+      setCurrentTab('home');
+    } catch {
+      appAlert('Ошибка', 'Не удалось переключить аккаунт. Проверьте подключение.');
     }
+    setTimeout(() => { setIsSwitchingAccount(false); }, 300);
   };
 
-  const handleAddAnotherAccount = async () => {
-    setIsAccountSwitcherVisible(false); setIsSideMenuVisible(false); await supabase.auth.signOut();
-    setGroups([]); setHistory([]); setActiveGroup(null); setGroupMembers([]); setTodayWorkouts([]); setUpcomingSessions([]);
+  // Сессия сохранённого аккаунта недействительна — открываем вход с уже введённым email.
+  const promptReLogin = (account: SavedAccount) => {
+    appAlert('Нужно войти заново', `Сессия аккаунта ${account.email} истекла. Введите пароль ещё раз.`, [
+      { text: 'Отмена', style: 'cancel' },
+      { text: 'Войти', onPress: () => { startAddAccount(account.email); } },
+    ]);
+  };
+
+  // «Добавить аккаунт»: текущий аккаунт остаётся залогиненным (его токен сохранён), поверх
+  // показывается экран входа. Успешный вход просто заменит сессию; «Отмена» — вернёт назад.
+  const startAddAccount = async (prefillEmail = '') => {
+    setIsAccountSwitcherVisible(false); setIsSideMenuVisible(false);
+    await snapshotCurrentAccount();
     smoothStateUpdate(() => {
-      setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
-      setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
-      setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
-      setTargetWeight(null); setStartWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
+      setAuthMode('login'); setEmail(prefillEmail); setPassword(''); setConfirmPassword(''); setName('');
+      setIsAddingAccount(true);
     });
+  };
+  const handleAddAnotherAccount = () => { startAddAccount(); };
+  const cancelAddAccount = () => {
+    smoothStateUpdate(() => { setIsAddingAccount(false); setAuthMode('login'); setPassword(''); setConfirmPassword(''); });
   };
 
   const handleSignOut = async () => {
-    const updated = savedAccounts.filter((a: SavedAccount) => a.id !== session?.user?.id);
-    setSavedAccounts(updated);
-    if (Platform.OS !== 'web') { await AsyncStorage.setItem('savedAccounts', JSON.stringify(updated)); } else { if (typeof window !== 'undefined') window.localStorage.setItem('savedAccounts', JSON.stringify(updated)); }
-    await supabase.auth.signOut();
+    const uid = session?.user?.id;
+    await persistAccounts((await kvGetJSON<SavedAccount[]>('savedAccounts', [])).filter(a => a.id !== uid));
+    // scope: 'local' — выходим только на этом устройстве. По умолчанию signOut глобальный и
+    // разлогинивал пользователя заодно на всех его телефонах.
+    await supabase.auth.signOut({ scope: 'local' });
     clearUserState();
+  };
+
+  // Данные, привязанные к пользователю: стираются при выходе и при смене аккаунта.
+  const resetUserScopedState = () => {
+    setGroups([]); setHistory([]); setActiveGroup(null); setGroupMembers([]); setTodayWorkouts([]); setUpcomingSessions([]);
+    setAssignNote(''); setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setRecentWeightLogs([]);
+    setConsumedCalories(0); setConsumedMacros({ protein: 0, fat: 0, carb: 0 });
+    setAssignedMealsToday([]); setSelfMealsToday([]); setMealParse(null);
+    chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
+    setTargetWeight(null); setStartWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
+    setDailyCalorieNorm(0); setMaintenanceCalories(0); setDailyMacros({ protein: 0, fat: 0, carb: 0 }); setUserGoal('maintain');
+    setSelectedMember(null); setMyDayPlan(null); setMemberDayPlan(null); setClientProfile(null);
+    setCompanionBrief(null);
+    if (restEndsAt) { setRestEndsAt(null); cancelScheduled(REST_TIMER_ID); }
+    nutritionExtraRef.current = { key: '', t: ZERO };
   };
 
   // Сброс всего пользовательского стейта после выхода/удаления аккаунта.
   const clearUserState = () => {
     smoothStateUpdate(() => {
-      setGroups([]); setHistory([]); setActiveGroup(null); setGroupMembers([]); setTodayWorkouts([]); setUpcomingSessions([]);
-      setAssignNote(''); setAuthMode('login'); setCurrentTab('home'); setIsSideMenuVisible(false); setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
-      setWaterIntake(0); setCurrentWeight(0); setWeightHistoryLogs([]); setConsumedCalories(0);
-      setConsumedMacros({ protein: 0, fat: 0, carb: 0 }); chatsLoadedRef.current = null; setChatSessions([]); setActiveChatId(null); setEditingMessageId(null); setIsChatSidebarVisible(false);
-      setTargetWeight(null); setStartWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
+      resetUserScopedState();
+      setAuthMode('login'); setCurrentTab('home'); setIsSideMenuVisible(false); setIsAddingAccount(false);
+      setEmail(''); setPassword(''); setConfirmPassword(''); setName('');
     });
   };
 
   const loadHistory = async () => {
-    const { data, error } = await supabase.from('workouts').select('*').eq('user_id', session?.user?.id).order('created_at', { ascending: false });
+    const uid = session?.user?.id;
+    if (!uid) return;
+    const { data, error } = await supabase.from('workouts').select('*').eq('user_id', uid).order('created_at', { ascending: false });
+    if (isStale(uid)) return;
     if (!error && data) setHistory(data as WorkoutRecord[]);
   };
 
@@ -782,7 +1018,7 @@ function useAppController() {
     if (!muscleGroup.trim()) return null;
     setIsGeneratingPlan(true);
     try {
-      const res = await generateWorkoutPlan(muscleGroup, preferences, session?.user?.id);
+      const res = await generateWorkoutPlan(muscleGroup, preferences, session?.user?.id, await buildAiContext());
       if (res?.status === 'limit_reached') { appAlert('Лимит', `Генерация планов: ${res.limit}/день. Лимит на сегодня исчерпан.`); return null; }
       if (!res?.plan || !Array.isArray(res.plan.exercises)) throw new Error('ИИ вернул данные в неверном формате');
       return res.plan as GeneratedWorkoutPlan;
@@ -805,6 +1041,7 @@ function useAppController() {
     }
     const allGroups = [...(ownedGroups || []), ...joinedGroups];
     const uniqueGroups = Array.from(new Map(allGroups.map((item: Group) => [item.id, item])).values());
+    if (isStale(session?.user?.id)) return;
     smoothStateUpdate(() => setGroups(uniqueGroups));
   };
 
@@ -818,6 +1055,7 @@ function useAppController() {
       let query = supabase.from('training_sessions').select('*').gte('session_date', getCurrentDateString()).order('session_date', { ascending: true }).order('session_time', { ascending: true });
       if (role === 'trainer') query = query.eq('trainer_id', session?.user?.id); else query = query.eq('client_id', session?.user?.id);
       const { data: sessions, error } = await query;
+      if (isStale(session?.user?.id)) return;
       if (error || !sessions) { setUpcomingSessions([]); return; }
       const groupIds = [...new Set(sessions.map((s: any) => s.group_id))];
       const clientIds = [...new Set(sessions.map((s: any) => s.client_id))];
@@ -847,7 +1085,7 @@ function useAppController() {
 
   // Локальные напоминания клиенту о его ближайших тренировках (за час и в момент начала).
   const syncSessionReminders = async (sessions: TrainingSession[]) => {
-    await cancelAllScheduled();
+    await cancelScheduledByPrefix('sess_');
     for (const s of sessions) {
       const start = new Date(`${s.session_date}T${s.session_time || '00:00'}`);
       if (isNaN(start.getTime())) continue;
@@ -913,13 +1151,19 @@ function useAppController() {
       closeAnimatedModal(setIsSchedulingVisible); fetchUpcomingSessions(); setSchedSelectedGroup(null); setSchedSelectedMember(null);
     }
   };
-  const deleteSession = async (id: string) => {
+  // Отмена записи — с подтверждением: раньше один промах по иконке корзины молча удалял
+  // запись и отправлял клиенту пуш об отмене.
+  const deleteSession = (id: string) => {
     const sess = upcomingSessions.find((s: TrainingSession) => s.id === id);
-    const { error } = await supabase.from('training_sessions').delete().eq('id', id);
-    if (!error) {
-      if (sess?.client_id) notifyUser(sess.client_id, 'Запись отменена 📅', `${sess.session_date} в ${sess.session_time} — отменена`, { tab: 'home' });
-      fetchUpcomingSessions();
-    }
+    appAlert('Отменить запись?', sess ? `${sess.client_name || 'Клиент'} · ${sess.session_date} в ${sess.session_time}. Клиент получит уведомление.` : undefined, [
+      { text: 'Нет', style: 'cancel' },
+      { text: 'Отменить запись', style: 'destructive', onPress: async () => {
+        const { error } = await supabase.from('training_sessions').delete().eq('id', id);
+        if (error) { appAlert('Ошибка', error.message); return; }
+        if (sess?.client_id) notifyUser(sess.client_id, 'Запись отменена 📅', `${sess.session_date} в ${sess.session_time} — отменена`, { tab: 'home' });
+        fetchUpcomingSessions();
+      } },
+    ]);
   };
 
   const loadMyDayPlan = async (date: string) => {
@@ -1041,47 +1285,101 @@ function useAppController() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, pendingInviteCode]);
 
-  const deleteOrLeaveGroup = async (group: Group) => {
-    if (group.owner_id === session?.user?.id) {
-      await supabase.from('groups').delete().eq('id', group.id); smoothStateUpdate(() => { setGroups(groups.filter((g: Group) => g.id !== group.id)); setActiveGroup(null); });
-    } else {
-      await supabase.from('group_members').delete().eq('group_id', group.id).eq('user_id', session?.user?.id); smoothStateUpdate(() => { setGroups(groups.filter((g: Group) => g.id !== group.id)); setActiveGroup(null); });
-    }
+  // Удаление клуба стирает всех участников и назначенные планы — спрашиваем ещё раз.
+  const deleteOrLeaveGroup = (group: Group) => {
+    const isOwner = group.owner_id === session?.user?.id;
+    appAlert(isOwner ? 'Удалить клуб?' : 'Выйти из клуба?',
+      isOwner ? `«${group.name}» будет удалён вместе со списком участников и назначенными планами.` : `Вы перестанете видеть планы тренера клуба «${group.name}».`, [
+      { text: 'Отмена', style: 'cancel' },
+      { text: isOwner ? 'Удалить' : 'Выйти', style: 'destructive', onPress: async () => {
+        const { error } = isOwner
+          ? await supabase.from('groups').delete().eq('id', group.id)
+          : await supabase.from('group_members').delete().eq('group_id', group.id).eq('user_id', session?.user?.id);
+        if (error) { appAlert('Ошибка', error.message); return; }
+        smoothStateUpdate(() => { setGroups(prev => prev.filter((g: Group) => g.id !== group.id)); setActiveGroup(null); });
+      } },
+    ]);
+  };
+
+  // Тренер убирает подходы из назначенного плана (раньше можно было только дописывать).
+  const removeAssignedExercises = async (exerciseIds: string[]) => {
+    const plan = memberDayPlan;
+    if (!plan || !exerciseIds.length) return;
+    const remaining = (plan.workout_data || []).filter(ex => !exerciseIds.includes(ex.id || ''));
+    smoothStateUpdate(() => {
+      setMemberDayPlan({ ...plan, workout_data: remaining });
+      setTodayWorkouts(prev => prev.map(w => (w.id === plan.id ? { ...w, workout_data: remaining } : w)));
+    });
+    const { error } = remaining.length
+      ? await supabase.from('assigned_workouts').update({ workout_data: remaining }).eq('id', plan.id)
+      : await supabase.from('assigned_workouts').delete().eq('id', plan.id);
+    if (error) { appAlert('Ошибка', error.message); loadMemberDayPlan(); }
   };
 
   const handleDeleteAccount = () => {
-    appAlert("Удаление", "Удалить аккаунт навсегда?", [
+    appAlert("Удаление аккаунта", "Профиль, тренировки, питание и история веса будут удалены навсегда. Продолжить?", [
       { text: "Отмена", style: "cancel" },
       { text: "Удалить", style: "destructive", onPress: async () => {
           setIsLoading(true);
           try {
-            await supabase.from('profiles').delete().eq('id', session?.user?.id);
-            await supabase.rpc('delete_user');
-            const updated = savedAccounts.filter((a: SavedAccount) => a.id !== session?.user?.id);
-            setSavedAccounts(updated);
-            if (Platform.OS !== 'web') { await AsyncStorage.setItem('savedAccounts', JSON.stringify(updated)); } else { if (typeof window !== 'undefined') window.localStorage.setItem('savedAccounts', JSON.stringify(updated)); }
-            await supabase.auth.signOut();
+            // Сначала сам аккаунт (RPC удаляет пользователя, строки уходят каскадом — см.
+            // db/fix_user_delete_cascade.sql). Раньше ошибки глушились: при сбое RPC человека
+            // разлогинивало, а аккаунт оставался — он думал, что данные удалены.
+            const { error } = await supabase.rpc('delete_user');
+            if (error) throw error;
+            const uid = session?.user?.id;
+            // meal_log и water_log не связаны внешним ключом с auth.users (см. db/phase0_meals_water.sql)
+            // и каскадом не удаляются — без этого еда и вода удалённого человека могли оставаться в базе.
+            // Токен ещё действителен, RLS разрешает удалять свои строки. Остальные таблицы —
+            // подстраховка на случай, если каскад в базе не настроен (иначе это пустые операции).
+            if (uid) {
+              await Promise.allSettled([
+                supabase.from('meal_log').delete().eq('user_id', uid),
+                supabase.from('water_log').delete().eq('user_id', uid),
+                supabase.from('assigned_meals').delete().eq('client_id', uid),
+                supabase.from('weight_log').delete().eq('user_id', uid),
+                supabase.from('workouts').delete().eq('user_id', uid),
+                supabase.from('group_members').delete().eq('user_id', uid),
+                supabase.from('profiles').delete().eq('id', uid),
+              ]);
+              await Promise.allSettled([kvRemove(`chatSessions_${uid}`), kvRemove(`companionBrief_${uid}`), kvRemove(`weight_logs_${uid}`)]);
+            }
+            await persistAccounts((await kvGetJSON<SavedAccount[]>('savedAccounts', [])).filter(a => a.id !== uid));
+            await supabase.auth.signOut({ scope: 'local' });
             // Как при «Выйти»: иначе на экране входа оставались почта и пароль удалённого аккаунта.
             clearUserState();
-          } catch (e) {} finally { setIsLoading(false); }
+          } catch (e: any) {
+            appAlert('Не удалось удалить аккаунт', translateAuthError(e));
+          } finally { setIsLoading(false); }
         }
       }
     ]);
   };
 
   const handleLogin = async () => {
-    if (!email || !password) return;
+    const em = email.trim().toLowerCase();
+    if (!em || !password) { appAlert('Вход', 'Введите email и пароль.'); return; }
     setIsLoadingAuth(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email: em, password });
       if (error) throw error;
-      if (data.user) await saveAccountToLocal(data.user, password);
-    } catch (error: unknown) { appAlert('Ошибка авторизации', (error as any)?.message || 'Unknown error'); } finally { setIsLoadingAuth(false); }
+      if (data.session) await rememberAccountSession(data.session);
+      setPassword('');
+      if (isAddingAccount) {
+        setIsSwitchingAccount(true);
+        smoothStateUpdate(() => { setIsAddingAccount(false); setCurrentTab('home'); });
+        setTimeout(() => setIsSwitchingAccount(false), 400);
+      }
+    } catch (error: unknown) { appAlert('Ошибка входа', translateAuthError(error)); } finally { setIsLoadingAuth(false); }
   };
 
+  // Проверяем email/пароль ДО анкеты: раньше ошибка «пароль короче 6 символов» (ещё и
+  // по-английски) приходила только в самом конце, после всех шагов регистрации.
   const handleCredentialsNext = () => {
-    if (!name || !email || !password || !confirmPassword) return;
-    if (password !== confirmPassword) { appAlert("Ошибка", "Пароли не совпадают"); return; }
+    if (!name.trim()) { appAlert('Регистрация', 'Введите имя или никнейм.'); return; }
+    if (!isValidEmail(email)) { appAlert('Регистрация', 'Проверьте email — похоже, в нём опечатка.'); return; }
+    if (password.length < 6) { appAlert('Регистрация', 'Пароль должен быть не короче 6 символов.'); return; }
+    if (password !== confirmPassword) { appAlert('Регистрация', 'Пароли не совпадают.'); return; }
     smoothStateUpdate(() => setAuthMode('register_goal'));
   };
 
@@ -1096,16 +1394,31 @@ function useAppController() {
     if (!userGender) { appAlert("Ошибка", "Пожалуйста, выберите пол"); return; }
     setIsLoadingAuth(true);
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({ email, password, options: { data: { role: userRole, name: name } } });
+      const em = email.trim().toLowerCase();
+      const nm = name.trim();
+      const { data: authData, error: authError } = await supabase.auth.signUp({ email: em, password, options: { data: { role: userRole, name: nm } } });
       if (authError) throw authError;
+      // Supabase не выдаёт ошибку на уже занятый email (защита от перебора) — только пустой identities.
+      if (authData.user && Array.isArray(authData.user.identities) && authData.user.identities.length === 0) {
+        appAlert('Регистрация', 'Аккаунт с таким email уже есть. Попробуйте войти.');
+        smoothStateUpdate(() => setAuthMode('login'));
+        return;
+      }
+      // Включено подтверждение почты: сессии ещё нет, профиль сохранить нельзя (RLS).
+      if (authData.user && !authData.session) {
+        appAlert('Подтвердите email', `Мы отправили письмо на ${em}. Перейдите по ссылке из письма, затем войдите.`);
+        smoothStateUpdate(() => { setAuthMode('login'); setPassword(''); setConfirmPassword(''); });
+        return;
+      }
       if (authData.user) {
         const fullHeight = parseFloat(`${userHeightWhole}.${userHeightDec}`);
         const fullWeight = parseFloat(`${userWeightWhole}.${userWeightDec}`);
         const finalTargetWeight = (goal === 'lose' || goal === 'gain') ? parseFloat(`${targetWeightWhole}.${targetWeightDec}`) : null;
-        const profilePayload = { id: authData.user.id, role: userRole, email: email, name: name, goal: goal || null, target_weight: finalTargetWeight, workouts_per_week: workoutsPerWeek || null, height: fullHeight, weight: fullWeight, age: userAge, gender: userGender };
-        await supabase.from('profiles').insert([profilePayload]);
+        const profilePayload = { id: authData.user.id, role: userRole, email: em, name: nm, goal: goal || null, target_weight: finalTargetWeight, workouts_per_week: workoutsPerWeek || null, height: fullHeight, weight: fullWeight, age: userAge, gender: userGender };
+        const { error: profileError } = await supabase.from('profiles').insert([profilePayload]);
+        if (profileError) appAlert('Профиль не сохранён', `${translateAuthError(profileError)} Данные анкеты можно будет указать позже.`);
         await supabase.from('weight_log').insert([{ user_id: authData.user.id, weight: fullWeight }]);
-        await saveAccountToLocal(authData.user, password);
+        if (authData.session) await rememberAccountSession(authData.session, { name: nm, role: userRole || '' });
         // Норму считаем здесь же: загрузка профиля при появлении сессии стартует параллельно с
         // insert выше и находит пустой профиль — без этого новичок видел «0 / --- ккал» до перезапуска.
         const t = computeNutritionTargets({
@@ -1115,47 +1428,45 @@ function useAppController() {
         smoothStateUpdate(() => {
           setCurrentWeight(fullWeight); setStartWeight(fullWeight); setUserGoal(goal || 'maintain'); setTargetWeight(finalTargetWeight);
           setMaintenanceCalories(t.maintenanceCalories); setDailyCalorieNorm(t.dailyCalorieNorm); setDailyMacros(t.macros);
+          setPassword(''); setConfirmPassword('');
+          if (isAddingAccount) { setIsAddingAccount(false); setCurrentTab('home'); }
         });
       }
-    } catch (error: unknown) { appAlert('Ошибка регистрации', (error as any)?.message || 'Unknown error'); } finally { setIsLoadingAuth(false); }
+    } catch (error: unknown) { appAlert('Ошибка регистрации', translateAuthError(error)); } finally { setIsLoadingAuth(false); }
+  };
+
+  // ===================== ЖУРНАЛ ТРЕНИРОВОК =====================
+  // Добавить подходы в «сегодня»: дописываем в сегодняшнюю строку workouts или создаём новую.
+  const appendToTodayWorkout = async (parsed: WorkoutData[], rawText: string) => {
+    const uid = session?.user?.id;
+    const { data: latestWorkouts } = await supabase.from('workouts').select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(1);
+    const last = latestWorkouts?.[0];
+    if (last && new Date(last.created_at).toDateString() === new Date().toDateString()) {
+      const { error } = await supabase.from('workouts').update({ raw_text: `${last.raw_text || ''}\n${rawText}`.trim(), parsed_data: [...(last.parsed_data || []), ...parsed] }).eq('id', last.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from('workouts').insert([{ raw_text: rawText, parsed_data: parsed, user_id: uid }]);
+      if (error) throw error;
+    }
   };
 
   const sendToAI = async (noteText: string): Promise<boolean> => {
-    if (!noteText) return false;
+    if (!noteText.trim()) return false;
     setIsLoading(true);
     try {
       const data = await parseWorkout(noteText, session?.user?.id);
       if (data?.status === 'limit_reached') { appAlert('Лимит разбора', `Разбор тренировок: ${data.limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return false; }
-      const newParsedData = data.parsed_data || [];
-
-      const { data: latestWorkouts } = await supabase
-        .from('workouts')
-        .select('*')
-        .eq('user_id', session?.user?.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (latestWorkouts && latestWorkouts.length > 0) {
-        const lastWorkout = latestWorkouts[0];
-        const isToday = new Date(lastWorkout.created_at).toDateString() === new Date().toDateString();
-
-        if (isToday) {
-          const combinedRawText = lastWorkout.raw_text + '\n' + noteText;
-          const combinedParsedData = [...(lastWorkout.parsed_data || []), ...newParsedData];
-          await supabase.from('workouts').update({ raw_text: combinedRawText, parsed_data: combinedParsedData }).eq('id', lastWorkout.id);
-        } else {
-          await supabase.from('workouts').insert([{ raw_text: noteText, parsed_data: newParsedData, user_id: session?.user?.id }]);
-        }
-      } else {
-        await supabase.from('workouts').insert([{ raw_text: noteText, parsed_data: newParsedData, user_id: session?.user?.id }]);
+      const newParsedData: WorkoutData[] = (data?.parsed_data || []).filter((x: any) => x && x.exercise);
+      // Раньше пустой разбор всё равно сохранялся «тренировкой» без подходов и показывал «Успех».
+      if (newParsedData.length === 0) {
+        appAlert('Не удалось распознать', 'Напишите упражнение, вес и повторы, например: «Жим лёжа 60кг 3 по 10».');
+        return false;
       }
-
+      const withIds: WorkoutData[] = newParsedData.map((ex, i) => ({ ...ex, id: `manual_${Date.now()}_${i}` }));
+      await appendToTodayWorkout(withIds, noteText.trim());
       loadHistory();
-      if (newParsedData.length > 0) {
-        const exercisesWithIds: WorkoutData[] = newParsedData.map((ex: any, i: number) => ({ ...ex, id: `manual_${Date.now()}_${i}` }));
-        await registerActivityForWeightLoss(exercisesWithIds, true);
-      }
-      appAlert('Успех', 'Тренировка записана!');
+      await registerActivityForWeightLoss(withIds, true);
+      appAlert('Записано 💪', `Добавлено в журнал: ${withIds.length} ${plural(withIds.length, ['подход', 'подхода', 'подходов'])}.`);
       return true;
     } catch (e: any) { appAlert('Ошибка связи', e.message); return false; } finally { setIsLoading(false); }
   };
@@ -1167,20 +1478,40 @@ function useAppController() {
     try {
       const parsed: WorkoutData[] = items.map((it, i) => ({ exercise: it.exercise, weight: Number(it.weight) || 0, reps: Number(it.reps) || 0, id: `manual_${Date.now()}_${i}` }));
       const rawText = parsed.map(p => `${p.exercise} ${p.weight}кг x ${p.reps}`).join('\n');
-      const { data: latestWorkouts } = await supabase.from('workouts').select('*').eq('user_id', session?.user?.id).order('created_at', { ascending: false }).limit(1);
-      if (latestWorkouts && latestWorkouts.length > 0 && new Date(latestWorkouts[0].created_at).toDateString() === new Date().toDateString()) {
-        const last = latestWorkouts[0];
-        await supabase.from('workouts').update({ raw_text: `${last.raw_text}\n${rawText}`, parsed_data: [...(last.parsed_data || []), ...parsed] }).eq('id', last.id);
-      } else {
-        await supabase.from('workouts').insert([{ raw_text: rawText, parsed_data: parsed, user_id: session?.user?.id }]);
-      }
+      await appendToTodayWorkout(parsed, rawText);
       loadHistory();
       await registerActivityForWeightLoss(parsed, true);
-      appAlert('Успех', 'Тренировка записана!');
+      appAlert('Тренировка записана 💪', `Добавлено в журнал: ${parsed.length} ${plural(parsed.length, ['подход', 'подхода', 'подходов'])}.`);
       return true;
     } catch (e: any) { appAlert('Ошибка', e.message); return false; } finally { setIsLoading(false); }
   };
 
+  // Удалить подходы из истории (ошибка ввода, разбор ИИ ошибся). Раньше записи в журнале
+  // нельзя было ни исправить, ни удалить — неверный подход навсегда портил рекорды и статистику.
+  const deleteJournalSets = async (refs: { _rid: string; _idx: number }[]) => {
+    if (!refs.length) return;
+    const byRid = new Map<string, Set<number>>();
+    refs.forEach(r => byRid.set(r._rid, (byRid.get(r._rid) || new Set()).add(r._idx)));
+    const jobs: PromiseLike<{ error: any }>[] = [];
+    const next: WorkoutRecord[] = [];
+    for (const rec of history) {
+      const del = byRid.get(rec.id);
+      if (!del) { next.push(rec); continue; }
+      const remaining = (rec.parsed_data || []).filter((_, i) => !del.has(i));
+      if (remaining.length) {
+        next.push({ ...rec, parsed_data: remaining });
+        jobs.push(supabase.from('workouts').update({ parsed_data: remaining }).eq('id', rec.id));
+      } else {
+        jobs.push(supabase.from('workouts').delete().eq('id', rec.id));
+      }
+    }
+    smoothStateUpdate(() => setHistory(next));
+    const results = await Promise.all(jobs);
+    if (results.some(r => r.error)) appAlert('Ошибка', 'Не удалось удалить запись. Проверьте подключение.');
+    loadHistory();
+  };
+
+  // ===================== ПИТАНИЕ: самозапись =====================
   // Клиент пишет «на завтрак..., на обед..., на ужин...» — делим на приёмы, каждый на продукты с КБЖУ.
   const calcClientMeals = async (text: string, mealType?: string) => {
     if (!text.trim()) return;
@@ -1188,12 +1519,13 @@ function useAppController() {
     try {
       const data = await parseMeals(text, session?.user?.id);
       if (data?.status === 'limit_reached') { appAlert('Лимит разбора', `Разбор еды: ${data.limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return; }
-      if (!data || data.error || !Array.isArray(data.meals)) throw new Error(data?.error || 'ИИ вернул данные в неверном формате');
+      if (!data || data.error || !Array.isArray(data.meals)) throw new Error('Не удалось разобрать еду. Попробуйте описать иначе.');
       const meals: MealItem[] = data.meals.map((meal: any, mi: number) => {
-        const items: FoodItem[] = (meal.items || []).map((it: any) => ({ name: it.name || 'блюдо', calories: it.calories || 0, protein: it.protein || 0, fat: it.fat || 0, carbs: it.carbs || 0 }));
+        const items: FoodItem[] = (meal.items || []).map((it: any) => ({ name: it.name || 'блюдо', calories: Number(it.calories) || 0, protein: Number(it.protein) || 0, fat: Number(it.fat) || 0, carbs: Number(it.carbs) || 0 }));
         const t = items.reduce((a, i) => ({ c: a.c + i.calories, p: a.p + i.protein, f: a.f + i.fat, cb: a.cb + i.carbs }), { c: 0, p: 0, f: 0, cb: 0 });
         return { id: `meal_${Date.now()}_${mi}`, meal_type: meal.meal_type || 'snack', name: items.map(i => i.name).join(', '), items, calories: t.c, protein: t.p, fat: t.f, carbs: t.cb, eaten: false };
-      });
+      }).filter((m: MealItem) => (m.items || []).length > 0);
+      if (meals.length === 0) throw new Error('Не нашли продуктов в тексте. Например: «200г творога и банан».');
       // Если приём один — берём выбранный в выпадающем списке; если ИИ нашёл несколько (в тексте «на завтрак…, на обед…») — уважаем его разметку.
       if (mealType && meals.length === 1) meals[0].meal_type = mealType;
       smoothStateUpdate(() => setMealParse(meals));
@@ -1204,18 +1536,40 @@ function useAppController() {
     }
   };
 
-  const confirmClientMeals = () => {
+  const confirmClientMeals = async () => {
     if (!mealParse || mealParse.length === 0) return;
-    const grand = mealParse.reduce((a, m) => ({ c: a.c + m.calories, p: a.p + m.protein, f: a.f + m.fat, cb: a.cb + m.carbs }), { c: 0, p: 0, f: 0, cb: 0 });
-    saveNutritionDataLocally(consumedCalories + grand.c, consumedMacros.protein + grand.p, consumedMacros.fat + grand.f, consumedMacros.carb + grand.cb);
-    if (session?.user?.id) {
-      const uid = session.user.id;
-      const today = getCurrentDateString();
-      const rows = mealParse.map(m => ({ user_id: uid, date: today, name: m.name, meal_type: m.meal_type, items: m.items, calories: m.calories, protein: m.protein, fat: m.fat, carbs: m.carbs, source: 'self' }));
-      supabase.from('meal_log').insert(rows).then(() => loadClientNutrition());
-    }
+    const rows = mealParse.map(m => ({ name: m.name, meal_type: m.meal_type, items: m.items, calories: m.calories, protein: m.protein, fat: m.fat, carbs: m.carbs, source: 'self' }));
     closeAnimatedModal(setIsMealModalVisible);
     setMealParse(null);
+    await insertMealRows(rows);
+  };
+
+  // ===================== ИИ-КОМПАНЬОН =====================
+  // Снимок приложения для ИИ: всё, что компаньон «знает» о пользователе (см. utils/companion.ts).
+  const buildAiContext = async (): Promise<string> => {
+    const uid = session?.user?.id;
+    // План от тренера на сегодня. todayWorkouts есть только у открытого клуба, поэтому спрашиваем базу.
+    let trainerPlanToday: WorkoutData[] | null = null;
+    if (uid) {
+      try {
+        const { data } = await supabase.from('assigned_workouts').select('workout_data').eq('client_id', uid).eq('date', getCurrentDateString()).maybeSingle();
+        trainerPlanToday = (data?.workout_data as WorkoutData[]) || null;
+      } catch {}
+    }
+    return buildCompanionContext({
+      name: displayName, role: session?.user?.user_metadata?.role || userRole, goal: userGoal,
+      currentWeight, startWeight, targetWeight,
+      weightLogs: recentWeightLogs.length ? recentWeightLogs : weightHistoryLogs,
+      dailyCalorieNorm, maintenanceCalories, dailyMacros, consumedCalories, consumedMacros,
+      selfMeals: selfMealsRef.current, assignedMeals: assignedMealsRef.current, waterLiters: waterRef.current,
+      dayGroups: journalDayGroups, exerciseStats, summary: workoutSummary,
+      trainerPlanToday, upcomingSessions, builderBlocks: workoutBlocks,
+    });
+  };
+
+  const setCompanionPersona = (p: CompanionPersona) => {
+    setCompanionPersonaState(p);
+    kvSet('companionPersona', p);
   };
 
   // Что ответ чата записал в дневник. Числа приводим явно: строка "330" от ИИ склеилась бы
@@ -1227,24 +1581,65 @@ function useAppController() {
     return { date: getCurrentDateString(), calories, protein: n(data.protein), fat: n(data.fat), carbs: n(data.carbs) };
   };
 
-  const createNewChat = () => { smoothStateUpdate(() => { setActiveChatId(null); setIsChatSidebarVisible(false); }); };
+  const guessMealType = () => {
+    const h = new Date().getHours();
+    return h < 11 ? 'breakfast' : h < 16 ? 'lunch' : h < 21 ? 'dinner' : 'snack';
+  };
+
+  const appendToChat = (chatId: string, msg: ChatMessage) =>
+    smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, msg], updatedAt: Date.now() } : c)));
+
+  // Один шаг диалога: шлём историю + снимок приложения, выполняем действия, которые попросил
+  // компаньон (записать еду / воду / вес), и добавляем его ответ с отметками о сделанном.
+  const runCompanionTurn = async (chatId: string, messages: ChatMessage[]) => {
+    setIsChatLoading(true);
+    const apiMessages = messages.map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text }));
+    const lastUserText = [...messages].reverse().find(m => m.sender === 'user')?.text || '';
+    try {
+      const appContext = await buildAiContext();
+      const data = await sendChat(apiMessages, session?.user?.id, dailyCalorieNorm, dailyMacros, appContext, companionPersona);
+      if (data?.limit_reached) {
+        appendToChat(chatId, { id: (Date.now() + 1).toString(), text: `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Лимит обновится завтра.`, sender: 'ai' });
+        return;
+      }
+      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai', workoutPlan: data.workout_plan || undefined };
+
+      const logged = chatNutrition(data);
+      if (logged) {
+        const [row] = await insertMealRows([{
+          name: lastUserText.slice(0, 80) || 'Запись из чата', meal_type: guessMealType(),
+          items: [{ name: lastUserText.slice(0, 80) || 'блюдо', calories: logged.calories, protein: logged.protein, fat: logged.fat, carbs: logged.carbs }],
+          calories: logged.calories, protein: logged.protein, fat: logged.fat, carbs: logged.carbs, source: 'chat',
+        }]);
+        aiMsg.logged = row ? { ...logged, rowId: row.id } : logged;
+      }
+      const waterMl = Number(data.water_ml) || 0;
+      if (waterMl > 0) {
+        const added = await addWaterAmount(waterMl / 1000);
+        if (added > 0) aiMsg.waterLogged = { date: getCurrentDateString(), liters: added };
+      }
+      const weightKg = Number(data.weight_kg) || 0;
+      if (weightKg > 0 && (await recordWeight(weightKg))) aiMsg.weightLogged = weightKg;
+
+      appendToChat(chatId, aiMsg);
+    } catch (error) {
+      appendToChat(chatId, { id: (Date.now() + 1).toString(), text: "Не удалось связаться с ИИ. Проверьте интернет и попробуйте ещё раз.", sender: 'ai' });
+    } finally { setIsChatLoading(false); }
+  };
+
+  const createNewChat = () => { smoothStateUpdate(() => { setActiveChatId(null); setIsChatSidebarVisible(false); setEditingMessageId(null); }); };
 
   const deleteChat = (id: string) => {
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm("Удалить этот диалог?");
-      if (confirmed) { smoothStateUpdate(() => { setChatSessions(prev => prev.filter(c => c.id !== id)); if (activeChatId === id) setActiveChatId(null); }); }
-    } else {
-      appAlert("Удаление", "Удалить этот диалог?", [
-        { text: "Отмена", style: "cancel" },
-        { text: "Удалить", style: "destructive", onPress: () => { smoothStateUpdate(() => { setChatSessions(prev => prev.filter(c => c.id !== id)); if (activeChatId === id) setActiveChatId(null); }); }}
-      ]);
-    }
+    appAlert("Удаление", "Удалить этот диалог?", [
+      { text: "Отмена", style: "cancel" },
+      { text: "Удалить", style: "destructive", onPress: () => { smoothStateUpdate(() => { setChatSessions(prev => prev.filter(c => c.id !== id)); if (activeChatId === id) setActiveChatId(null); }); }}
+    ]);
   };
 
   const startEditMessage = (msg: ChatMessage) => { smoothStateUpdate(() => { setEditingMessageId(msg.id); setEditInput(msg.text); }); };
 
   const saveEditMessage = async () => {
-    if (!activeChatId || !editingMessageId || !editInput.trim()) return;
+    if (!activeChatId || !editingMessageId || !editInput.trim() || isChatLoading) return;
     const chat = chatSessions.find(c => c.id === activeChatId);
     if (!chat) return;
 
@@ -1252,44 +1647,29 @@ function useAppController() {
     if (msgIndex === -1) return;
 
     const updatedMessages = [...chat.messages.slice(0, msgIndex), { ...chat.messages[msgIndex], text: editInput.trim() }];
-    // Ответы после правленного сообщения удаляются — откатываем еду, которую они записали сегодня,
-    // иначе «я съел 200г курицы» → правка на 150г записывало курицу второй раз.
+    // Ответы после правленного сообщения удаляются — откатываем то, что они записали сегодня
+    // (еду и воду), иначе «я съел 200г курицы» → правка на 150г записывало курицу второй раз.
     const today = getCurrentDateString();
-    const undone = chat.messages.slice(msgIndex + 1).reduce((a, m) => (m.logged && m.logged.date === today)
-      ? { c: a.c + m.logged.calories, p: a.p + m.logged.protein, f: a.f + m.logged.fat, cb: a.cb + m.logged.carbs } : a,
-      { c: 0, p: 0, f: 0, cb: 0 });
-    const base = {
-      c: Math.max(0, consumedCalories - undone.c), p: Math.max(0, consumedMacros.protein - undone.p),
-      f: Math.max(0, consumedMacros.fat - undone.f), cb: Math.max(0, consumedMacros.carb - undone.cb),
-    };
-    if (undone.c > 0) saveNutritionDataLocally(base.c, base.p, base.f, base.cb);
+    const undone = chat.messages.slice(msgIndex + 1);
+    const rowIds = undone.filter(m => m.logged?.date === today && m.logged.rowId).map(m => m.logged!.rowId!);
+    const legacy = undone.filter(m => m.logged?.date === today && !m.logged.rowId)
+      .reduce((a, m) => addT(a, { c: m.logged!.calories, p: m.logged!.protein, f: m.logged!.fat, cb: m.logged!.carbs }), ZERO);
+    const water = undone.filter(m => m.waterLogged?.date === today).reduce((a, m) => a + (m.waterLogged?.liters || 0), 0);
+
     smoothStateUpdate(() => {
       setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: updatedMessages, updatedAt: Date.now() } : c));
       setEditingMessageId(null);
     });
-    setIsChatLoading(true);
+    if (rowIds.length) {
+      const next = selfMealsRef.current.filter(m => !rowIds.includes(m.id));
+      setSelfMealsToday(next); selfMealsRef.current = next;
+      await supabase.from('meal_log').delete().in('id', rowIds);
+    }
+    if (legacy.c > 0) await setExtra(subT(await getExtra(), legacy));
+    if (rowIds.length || legacy.c > 0) await recomputeTotals(assignedMealsRef.current, selfMealsRef.current);
+    if (water > 0) await addWaterAmount(-water);
 
-    const apiMessages = updatedMessages.map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: m.text }));
-
-    try {
-      const data = await sendChat(apiMessages, session?.user?.id, dailyCalorieNorm, dailyMacros);
-      if (data?.limit_reached) {
-        const lm: ChatMessage = { id: (Date.now() + 1).toString(), text: `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Лимит обновится завтра.`, sender: 'ai' };
-        smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, lm], updatedAt: Date.now() } : c)));
-        return;
-      }
-
-      const logged = chatNutrition(data);
-      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai', workoutPlan: data.workout_plan || undefined, logged };
-      smoothStateUpdate(() => {
-        setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, aiMsg], updatedAt: Date.now() } : c));
-      });
-
-      if (logged) saveNutritionDataLocally(base.c + logged.calories, base.p + logged.protein, base.f + logged.fat, base.cb + logged.carbs);
-    } catch (error) {
-      const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "Не удалось связаться с ИИ. Проверьте интернет и попробуйте ещё раз.", sender: 'ai' };
-      smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: [...c.messages, errorMsg], updatedAt: Date.now() } : c)));
-    } finally { setIsChatLoading(false); }
+    await runCompanionTurn(activeChatId, updatedMessages);
   };
 
   // Кнопка "Добавить в тренировку" под сообщением чата: кладём план в pendingWorkoutPlan
@@ -1299,66 +1679,117 @@ function useAppController() {
     handleTabChange('workout');
   };
 
-  const handleSendChatMessage = async (messageText: string) => {
-    if (!messageText.trim()) return;
-    const userMsg: ChatMessage = { id: Date.now().toString(), text: messageText.trim(), sender: 'user' };
+  const handleSendChatMessage = async (messageText: string, opts?: { newChat?: boolean }) => {
+    const text = messageText.trim();
+    if (!text || isChatLoading) return;
+    const userMsg: ChatMessage = { id: Date.now().toString(), text, sender: 'user' };
 
-    let chatId = activeChatId;
-    let isNewChat = false;
+    let chatId = opts?.newChat ? null : activeChatId;
+    const activeChat = chatId ? chatSessions.find(c => c.id === chatId) : undefined;
+    if (!activeChat) chatId = null; // активный диалог могли удалить
+    const isNewChat = !chatId;
+    if (!chatId) { chatId = Date.now().toString(); setActiveChatId(chatId); }
 
-    if (!chatId) { chatId = Date.now().toString(); isNewChat = true; setActiveChatId(chatId); }
-
-    const activeChat = chatSessions.find(c => c.id === chatId);
-    const generatedTitle = userMsg.text.length > 25 ? userMsg.text.substring(0, 25) + '...' : userMsg.text;
-
+    const generatedTitle = text.length > 25 ? text.substring(0, 25) + '...' : text;
     const newSessionContent: ChatSession = isNewChat
         ? { id: chatId, title: generatedTitle, messages: [userMsg], updatedAt: Date.now() }
         : { ...activeChat!, messages: [...activeChat!.messages, userMsg], updatedAt: Date.now(), title: activeChat!.title === 'Новый диалог' ? generatedTitle : activeChat!.title };
 
     smoothStateUpdate(() => setChatSessions(prev => isNewChat ? [newSessionContent, ...prev] : prev.map(c => c.id === chatId ? newSessionContent : c)));
-    setIsChatLoading(true);
-
-    const apiMessages = newSessionContent.messages.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text }));
-
-    try {
-      const data = await sendChat(apiMessages, session?.user?.id, dailyCalorieNorm, dailyMacros);
-      if (data?.limit_reached) {
-        const lm: ChatMessage = { id: (Date.now() + 1).toString(), text: `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Лимит обновится завтра.`, sender: 'ai' };
-        smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, lm], updatedAt: Date.now() } : c)));
-        return;
-      }
-
-      const logged = chatNutrition(data);
-      const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai', workoutPlan: data.workout_plan || undefined, logged };
-      smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, aiMsg], updatedAt: Date.now() } : c)));
-
-      if (logged) saveNutritionDataLocally(consumedCalories + logged.calories, consumedMacros.protein + logged.protein, consumedMacros.fat + logged.fat, consumedMacros.carb + logged.carbs);
-    } catch (error) {
-      const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: "Не удалось связаться с ИИ. Проверьте интернет и попробуйте ещё раз.", sender: 'ai' };
-      smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, errorMsg], updatedAt: Date.now() } : c)));
-    } finally { setIsChatLoading(false); }
+    await runCompanionTurn(chatId, newSessionContent.messages);
   };
 
+  // «Спросить компаньона» с любого экрана: новый диалог во вкладке чата с готовым вопросом.
+  const askCompanion = (question: string) => {
+    smoothStateUpdate(() => { setIsChatSidebarVisible(false); setEditingMessageId(null); });
+    handleTabChange('chat');
+    handleSendChatMessage(question, { newChat: true });
+  };
+
+  // Совет дня для карточки на главном: раз в день (кэш в хранилище), вручную — по кнопке.
+  const briefKey = () => `companionBrief_${session?.user?.id || 'guest'}`;
+  const loadCachedBrief = async () => {
+    const b = await kvGetJSON<CompanionBrief | null>(briefKey(), null);
+    if (b && b.date === getCurrentDateString()) setCompanionBrief(b);
+  };
+  const briefBusyRef = useRef(false);
+  // Автозапрос — не чаще раза в день на аккаунт, даже если он не удался (нет сети, лимит):
+  // иначе каждый заход на главный экран снова стучался бы в ИИ.
+  const briefAutoTriedRef = useRef('');
+  const refreshCompanionBrief = async (force = false) => {
+    const today = getCurrentDateString();
+    if (!session?.user?.id || briefBusyRef.current) return;
+    if (!force && companionBrief?.date === today) return;
+    const triedKey = `${session.user.id}_${today}`;
+    if (!force && briefAutoTriedRef.current === triedKey) return;
+    briefAutoTriedRef.current = triedKey;
+    briefBusyRef.current = true;
+    setIsBriefLoading(true);
+    try {
+      const res = await fetchCompanionBrief(await buildAiContext(), companionPersona, session.user.id);
+      if (res?.status === 'success' && res.message) {
+        const b: CompanionBrief = { date: today, headline: res.headline, message: res.message, suggestion: res.suggestion };
+        setCompanionBrief(b);
+        kvSetJSON(briefKey(), b);
+      } else if (res?.status === 'limit_reached' && force) {
+        appAlert('Лимит', `Дневной лимит ИИ (${res.limit}) исчерпан. Обновится завтра.`);
+      }
+    } catch (e: any) {
+      if (force) appAlert('Компаньон недоступен', e?.message || 'Попробуйте позже.');
+    } finally {
+      briefBusyRef.current = false;
+      setIsBriefLoading(false);
+    }
+  };
+
+  // ===================== ВОДА =====================
   // Вода в БД (Фаза 5): персист в water_log, чтобы переживала перезапуск и была видна тренеру.
   const loadTodayWater = async () => {
     if (!session?.user?.id) return;
     const { data } = await supabase.from('water_log').select('liters').eq('user_id', session.user.id).eq('date', getCurrentDateString()).maybeSingle();
+    if (isStale(session.user.id)) return;
+    waterRef.current = data?.liters || 0;
     setWaterIntake(data?.liters || 0);
   };
   const persistWater = async (liters: number) => {
     if (!session?.user?.id) return;
     await supabase.from('water_log').upsert({ user_id: session.user.id, date: getCurrentDateString(), liters }, { onConflict: 'user_id, date' });
   };
-  const addWater = () => {
-    if (waterIntake >= 5.0) return;
-    const next = Math.min(5.0, parseFloat((waterIntake + 0.2).toFixed(1)));
+  const WATER_MAX = 6;
+  // Изменить воду на delta литров (может быть < 0). Возвращает фактическое изменение.
+  const addWaterAmount = async (delta: number): Promise<number> => {
+    const cur = waterRef.current;
+    const next = Math.max(0, Math.min(WATER_MAX, parseFloat((cur + delta).toFixed(2))));
+    if (next === cur) return 0;
+    waterRef.current = next;
     smoothStateUpdate(() => setWaterIntake(next));
-    persistWater(next);
+    await persistWater(next);
+    return parseFloat((next - cur).toFixed(2));
   };
-  const resetWater = () => {
-    smoothStateUpdate(() => setWaterIntake(0));
-    persistWater(0);
+  const addWater = () => { addWaterAmount(0.2); };
+  const removeWater = () => { addWaterAmount(-0.2); };
+  const resetWater = () => { addWaterAmount(-waterRef.current); };
+
+  // ===================== ТАЙМЕР ОТДЫХА =====================
+  useEffect(() => { kvGet('restDuration').then(v => { const n = Number(v); if (v !== null && Number.isFinite(n)) setRestDuration(n); }); }, []);
+  const scheduleRestNotification = async (endsAt: number) => {
+    await cancelScheduled(REST_TIMER_ID);
+    await scheduleLocalReminder(REST_TIMER_ID, 'Отдых окончен 💪', 'Пора делать следующий подход', new Date(endsAt), { tab: 'workout' });
   };
+  const startRestTimer = (seconds = restDuration) => {
+    if (!seconds || seconds <= 0) return;
+    const endsAt = Date.now() + seconds * 1000;
+    setRestEndsAt(endsAt);
+    scheduleRestNotification(endsAt);
+  };
+  const adjustRestTimer = (deltaSec: number) => {
+    if (!restEndsAt) return;
+    const endsAt = Math.max(Date.now() + 1000, restEndsAt + deltaSec * 1000);
+    setRestEndsAt(endsAt);
+    scheduleRestNotification(endsAt);
+  };
+  const stopRestTimer = () => { setRestEndsAt(null); cancelScheduled(REST_TIMER_ID); };
+  const changeRestDuration = (seconds: number) => { setRestDuration(seconds); kvSet('restDuration', String(seconds)); if (seconds === 0) stopRestTimer(); };
 
   // --- 📈 УЛУЧШЕННЫЙ ГРАФИК ВЕСА ---
   const chartDataMemo = useMemo(() => {
@@ -1538,6 +1969,7 @@ function useAppController() {
     handleLogin, handleCredentialsNext, handleGoalNext, handleFinalRegister,
     handleSignOut, handleSwitchAccount, handleAddAnotherAccount, handleDeleteAccount,
     savedAccounts, isAccountSwitcherVisible, setIsAccountSwitcherVisible,
+    isAddingAccount, cancelAddAccount,
     displayName,
 
     // navigation / ui
@@ -1550,19 +1982,21 @@ function useAppController() {
     isWeightModalVisible, setIsWeightModalVisible,
     manualWeightWhole, setManualWeightWhole, manualWeightDec, setManualWeightDec,
     chartPeriod, setChartPeriod, chartDataMemo, handleManualWeightUpdate,
-    waterIntake, addWater, resetWater,
+    waterIntake, addWater, removeWater, resetWater,
 
     // nutrition
     dailyCalorieNorm, maintenanceCalories, dailyMacros, consumedCalories, consumedMacros,
     isMealModalVisible, setIsMealModalVisible,
     isMealPreviewLoading, mealParse, setMealParse,
     calcClientMeals, confirmClientMeals,
-    assignedMealsToday, selfMealsToday, toggleAssignedMealEaten, loadClientNutrition,
+    assignedMealsToday, selfMealsToday, toggleAssignedMealEaten, loadClientNutrition, deleteSelfMeal,
 
     // workout journal
     history, sendToAI, addStructuredWorkout,
     isGeneratingPlan, generateAiWorkoutPlan, pendingWorkoutPlan, setPendingWorkoutPlan, sendPlanToJournal,
-    workoutBlocks, setWorkoutBlocks, journalDayGroups,
+    workoutBlocks, setWorkoutBlocks, journalDayGroups, deleteJournalSets,
+    exerciseStats, workoutSummary,
+    restEndsAt, restDuration, startRestTimer, adjustRestTimer, stopRestTimer, changeRestDuration,
 
     // groups / clubs
     groups, activeGroup, setActiveGroup, groupMembers, setGroupMembers, todayWorkouts, setTodayWorkouts,
@@ -1573,7 +2007,7 @@ function useAppController() {
     myPlanViewDate, setMyPlanViewDate, myDayPlan, setMyDayPlan, shiftMyPlanDate, memberDayPlan,
     clientProfile,
     createGroup, joinGroup, deleteOrLeaveGroup, fetchGroupDetails,
-    assignWorkoutToMember, toggleExerciseStatus,
+    assignWorkoutToMember, toggleExerciseStatus, removeAssignedExercises,
 
     // scheduling / calendar
     upcomingSessions, isScheduleListVisible, setIsScheduleListVisible,
@@ -1587,6 +2021,9 @@ function useAppController() {
     editingMessageId, setEditingMessageId, editInput, setEditInput,
     isChatLoading, chatScrollRef,
     createNewChat, deleteChat, startEditMessage, saveEditMessage, handleSendChatMessage,
+
+    // ИИ-компаньон
+    companionPersona, setCompanionPersona, companionBrief, isBriefLoading, refreshCompanionBrief, askCompanion,
   };
 }
 

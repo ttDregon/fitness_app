@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Modal, Animated, LayoutAnimation } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -7,6 +7,7 @@ import { ScrollPicker } from '../components/ScrollPicker';
 import { GradientButton, GradientView } from '../components/Gradient';
 import { weightWholeData, decimalsData } from '../utils/pickers';
 import { goalProgressPct } from '../utils/goal';
+import { plural } from '../utils/date';
 import { styles } from '../styles';
 import { COLORS, GRADIENTS, screenWidth } from '../theme';
 import { useApp } from '../context/AppContext';
@@ -23,7 +24,15 @@ export default function HomeScreen() {
     setScheduleStep, schedDate, schedTime, setDatePickerVisible, setTimePickerVisible, datePickerVisible,
     tempDate, onDateChange, timePickerVisible, onTimeChange, saveTrainingSession, setIsSchedulingVisible,
     smoothStateUpdate, chartPeriod, setChartPeriod, chartDataMemo, upcomingSessions, deleteSession,
+    removeWater, companionBrief, isBriefLoading, refreshCompanionBrief, askCompanion, workoutSummary, bootReady,
   } = useApp();
+
+  // Совет компаньона на день: подтягивается сам один раз в сутки (дальше — из кэша),
+  // когда загрузились данные, иначе ИИ анализировал бы пустоту.
+  useEffect(() => {
+    if (bootReady && !companionBrief) refreshCompanionBrief();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootReady]);
 
   const renderChartSection = () => {
     if (!isWeightModalVisible) return null;
@@ -186,7 +195,7 @@ export default function HomeScreen() {
 
         {chartPeriod !== 'day' && daysTracked > 0 && (
           <Text style={styles.trackerDaysNote}>
-            {daysTracked} {daysTracked === 1 ? 'день' : daysTracked < 5 ? 'дня' : 'дней'} измерений
+            {daysTracked} {plural(daysTracked, ['день', 'дня', 'дней'])} измерений
           </Text>
         )}
 
@@ -227,6 +236,38 @@ export default function HomeScreen() {
         <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
       </View>
 
+      <View style={companionCard}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+          <View style={companionIcon}><Ionicons name="sparkles" size={18} color="#fff" /></View>
+          <Text style={{ flex: 1, color: COLORS.textSecondary, fontSize: 13, fontWeight: '800', letterSpacing: 0.3 }}>КОМПАНЬОН STRIVA</Text>
+          <TouchableOpacity onPress={() => refreshCompanionBrief(true)} disabled={isBriefLoading} style={{ padding: 4 }} accessibilityLabel="Обновить совет">
+            {isBriefLoading ? <ActivityIndicator size="small" color={COLORS.indigo} /> : <Ionicons name="refresh" size={18} color={COLORS.textMuted} />}
+          </TouchableOpacity>
+        </View>
+        {companionBrief ? (
+          <>
+            <Text style={{ color: COLORS.textPrimary, fontSize: 18, fontWeight: '800', marginBottom: 6 }}>{companionBrief.headline}</Text>
+            <Text style={{ color: COLORS.textSecondary, fontSize: 14, lineHeight: 20 }}>{companionBrief.message}</Text>
+          </>
+        ) : (
+          <Text style={{ color: COLORS.textSecondary, fontSize: 14, lineHeight: 20 }}>
+            {isBriefLoading ? 'Смотрю твой журнал, питание и вес…' : 'Я вижу твои тренировки, питание, воду и вес. Спроси — и я отвечу по твоим реальным данным.'}
+          </Text>
+        )}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 12 }}>
+          <TouchableOpacity onPress={() => askCompanion('Пересмотри мои последние тренировки и посоветуй, что сделать сегодня. Дай конкретный план с весами.')} style={companionChip}>
+            <Ionicons name="barbell-outline" size={14} color={COLORS.indigo} />
+            <Text style={companionChipText}>Что сделать сегодня?</Text>
+          </TouchableOpacity>
+          {!!companionBrief?.suggestion && (
+            <TouchableOpacity onPress={() => askCompanion(companionBrief.suggestion)} style={companionChip}>
+              <Ionicons name="chatbubble-ellipses-outline" size={14} color={COLORS.indigo} />
+              <Text style={companionChipText} numberOfLines={1}>{companionBrief.suggestion}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
       <TouchableOpacity style={[styles.mainActionBtn, {backgroundColor: COLORS.card, borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.4)', marginBottom: 15, shadowColor: 'transparent', elevation: 0}]} onPress={() => openAnimatedModal(setIsScheduleListVisible)}>
         <Ionicons name="calendar-outline" size={24} color={COLORS.tabBar} style={{marginRight: 10}} />
         <Text style={[styles.mainActionText, {color: COLORS.textPrimary}]}>Календарь записей</Text>
@@ -260,9 +301,26 @@ export default function HomeScreen() {
           <Ionicons name="water" size={30} color={COLORS.cyan} style={{marginBottom: 8}} />
           <Text style={styles.metricTitle}>Вода</Text>
           <Text style={styles.metricValue}>{waterIntake.toFixed(1)} л</Text>
-          <TouchableOpacity style={styles.miniBtn} onPress={addWater} onLongPress={resetWater}><Text style={styles.miniBtnText}>+200 мл</Text></TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity style={[styles.miniBtn, { paddingHorizontal: 12, marginRight: 6, opacity: waterIntake > 0 ? 1 : 0.4 }]} onPress={removeWater} disabled={waterIntake <= 0} accessibilityLabel="Убрать 200 мл"><Text style={styles.miniBtnText}>−</Text></TouchableOpacity>
+            <TouchableOpacity style={[styles.miniBtn, { paddingHorizontal: 12 }]} onPress={addWater} onLongPress={resetWater} accessibilityLabel="Добавить 200 мл"><Text style={styles.miniBtnText}>+200 мл</Text></TouchableOpacity>
+          </View>
         </View>
       </View>
+
+      {/* Неделя в цифрах → полный экран статистики */}
+      <TouchableOpacity style={weekCard} onPress={() => handleTabChange('stats')}>
+        <Ionicons name="stats-chart" size={22} color={COLORS.cyan} style={{ marginRight: 12 }} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: COLORS.textPrimary, fontSize: 15, fontWeight: '800' }}>
+            На этой неделе: {workoutSummary.weekWorkouts} {plural(workoutSummary.weekWorkouts, ['тренировка', 'тренировки', 'тренировок'])}
+          </Text>
+          <Text style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>
+            {workoutSummary.weekStreak > 0 ? `Серия: ${workoutSummary.weekStreak} ${plural(workoutSummary.weekStreak, ['неделя', 'недели', 'недель'])} подряд 🔥` : 'Рекорды, тоннаж и динамика — в статистике'}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+      </TouchableOpacity>
 
       {isWeightModalVisible && (
         <Modal transparent animationType="none" onRequestClose={() => closeAnimatedModal(setIsWeightModalVisible)}>
@@ -395,3 +453,9 @@ export default function HomeScreen() {
     </ScrollView>
   );
 }
+
+const companionCard = { backgroundColor: COLORS.card, borderRadius: 24, padding: 18, marginBottom: 16, borderWidth: 1, borderColor: 'rgba(99,102,241,0.35)' };
+const companionIcon = { width: 30, height: 30, borderRadius: 10, backgroundColor: COLORS.indigo, alignItems: 'center' as const, justifyContent: 'center' as const, marginRight: 10 };
+const companionChip = { flexDirection: 'row' as const, alignItems: 'center' as const, maxWidth: '100%' as const, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, marginRight: 8, marginBottom: 6, backgroundColor: 'rgba(99,102,241,0.12)', borderWidth: 1, borderColor: 'rgba(99,102,241,0.35)' };
+const companionChipText = { color: COLORS.textPrimary, fontSize: 13, fontWeight: '700' as const, marginLeft: 6, flexShrink: 1 };
+const weekCard = { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: COLORS.card, borderRadius: 22, padding: 16, marginTop: -14, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(34,211,238,0.22)' };

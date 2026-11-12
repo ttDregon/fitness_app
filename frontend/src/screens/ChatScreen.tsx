@@ -2,6 +2,46 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, StatusBar, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GradientButton } from '../components/Gradient';
+import { KeyboardAvoid } from '../components/KeyboardAvoid';
+import type { CompanionPersona } from '../api/backend';
+import type { ChatMessage } from '../types';
+
+// Быстрые вопросы компаньону. Только «аналитические»: пример вроде «съел 200 г курицы»
+// записал бы в дневник выдуманную еду, поэтому про действия — подсказка текстом ниже.
+const SUGGESTIONS = [
+  'Пересмотри мои тренировки и посоветуй, что сделать сегодня',
+  'Как у меня с питанием сегодня? Что добрать до нормы?',
+  'Оцени мой прогресс по весу и скажи, всё ли идёт по плану',
+  'Составь тренировку на грудь с учётом моих рекордов',
+  'Какие группы мышц я давно не тренировал?',
+];
+
+const PERSONAS: { key: CompanionPersona; label: string; icon: any }[] = [
+  { key: 'friendly', label: 'Дружелюбный', icon: 'happy-outline' },
+  { key: 'strict', label: 'Строгий', icon: 'flash-outline' },
+  { key: 'calm', label: 'Спокойный', icon: 'leaf-outline' },
+];
+
+const fmtLiters = (l: number) => `${l > 0 ? '+' : ''}${+l.toFixed(2)} л`;
+
+// Что компаньон сделал в приложении по этому сообщению — видно сразу под ответом.
+function ActionBadges({ msg }: { msg: ChatMessage }) {
+  const items: { icon: any; color: string; text: string }[] = [];
+  if (msg.logged) items.push({ icon: 'restaurant', color: COLORS.emerald, text: `В дневник: ${msg.logged.calories} ккал · Б${msg.logged.protein} Ж${msg.logged.fat} У${msg.logged.carbs}` });
+  if (msg.waterLogged) items.push({ icon: 'water', color: COLORS.cyan, text: `Вода ${fmtLiters(msg.waterLogged.liters)}` });
+  if (msg.weightLogged) items.push({ icon: 'scale', color: COLORS.violet, text: `Вес ${msg.weightLogged} кг записан` });
+  if (!items.length) return null;
+  return (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 }}>
+      {items.map((it, i) => (
+        <View key={i} style={[actionBadge, { borderColor: `${it.color}66` }]}>
+          <Ionicons name={it.icon} size={13} color={it.color} />
+          <Text style={{ color: it.color, fontSize: 12, fontWeight: '700', marginLeft: 5 }}>{it.text}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
 import { styles } from '../styles';
 import { COLORS, GRADIENTS } from '../theme';
 import { useApp } from '../context/AppContext';
@@ -33,6 +73,7 @@ export default function ChatScreen() {
     smoothStateUpdate, setActiveChatId, deleteChat, displayName, openAnimatedModal, handleTabChange,
     editingMessageId, editInput, setEditInput, setEditingMessageId, saveEditMessage, startEditMessage,
     isChatLoading, handleSendChatMessage, chatScrollRef, sendPlanToJournal,
+    companionPersona, setCompanionPersona,
   } = useApp();
   // Локальный стейт ввода — чтобы набор текста не перерисовывал весь общий контекст.
   const [chatInput, setChatInput] = useState('');
@@ -65,6 +106,15 @@ export default function ChatScreen() {
                  <Text style={styles.newChatBtnTextSidebar}>Новый чат</Text>
               </GradientButton>
 
+              <Text style={styles.sidebarSectionTitle}>Характер компаньона</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 6 }}>
+                {PERSONAS.map(p => (
+                  <TouchableOpacity key={p.key} onPress={() => setCompanionPersona(p.key)} style={[personaChip, companionPersona === p.key && personaChipActive]}>
+                    <Text style={{ color: companionPersona === p.key ? '#fff' : COLORS.textSecondary, fontSize: 12, fontWeight: '700' }}>{p.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
               <Text style={styles.sidebarSectionTitle}>Чаты</Text>
               <ScrollView showsVerticalScrollIndicator={false}>
                 {[...chatSessions].sort((a,b) => b.updatedAt - a.updatedAt).map(chat => (
@@ -90,7 +140,12 @@ export default function ChatScreen() {
   const activeChat = chatSessions.find(c => c.id === activeChatId);
   const currentMessages = activeChat ? activeChat.messages : [];
 
+  const send = (text: string) => { if (!text.trim() || isChatLoading) return; handleSendChatMessage(text); setChatInput(''); };
+
   return (
+    // offset −98: под полем ввода оставлено ~110 px под таб-бар; при открытой клавиатуре
+    // таб-бар уходит под неё, и этот отступ не нужен — поле встаёт прямо над клавиатурой.
+    <KeyboardAvoid offset={-98}>
     <View style={styles.mainContent}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <View style={styles.header}>
@@ -98,7 +153,7 @@ export default function ChatScreen() {
            <Ionicons name="menu" size={32} color={COLORS.textPrimary} />
         </TouchableOpacity>
         <View style={{ flex: 1, marginRight: 15 }}>
-           <Text style={styles.pageTitle} numberOfLines={1}>{activeChatId ? activeChat?.title : 'Новый чат'}</Text>
+           <Text style={styles.pageTitle} numberOfLines={1}>{activeChatId ? activeChat?.title : 'Компаньон'}</Text>
         </View>
         <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}>
            <Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} />
@@ -108,15 +163,34 @@ export default function ChatScreen() {
       {renderChatSidebar()}
 
       {!activeChatId && currentMessages.length === 0 ? (
-        <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20}}>
-           <Ionicons name="chatbubbles" size={80} color={COLORS.indigo} style={{opacity: 0.7, marginBottom: 20}} />
-           <Text style={{fontSize: 28, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 12, textAlign: 'center'}}>
-              Привет, {displayName}!
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingVertical: 10 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+           <View style={{ alignItems: 'center' }}>
+             <View style={companionAvatar}><Ionicons name="sparkles" size={34} color="#fff" /></View>
+             <Text style={{fontSize: 24, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 8, textAlign: 'center'}}>
+                Привет, {displayName}!
+             </Text>
+             <Text style={{fontSize: 15, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 22, marginBottom: 18}}>
+                Я — Striva, твой ИИ-компаньон. Вижу твой журнал, рекорды, вес, питание и воду, так что отвечаю по твоим реальным данным.
+             </Text>
+           </View>
+           {SUGGESTIONS.map(q => (
+             <TouchableOpacity key={q} onPress={() => send(q)} style={suggestionChip} disabled={isChatLoading}>
+               <Ionicons name="arrow-forward-circle" size={18} color={COLORS.indigo} style={{ marginRight: 10 }} />
+               <Text style={{ flex: 1, color: COLORS.textPrimary, fontSize: 14, fontWeight: '600' }}>{q}</Text>
+             </TouchableOpacity>
+           ))}
+           <Text style={{ color: COLORS.textMuted, fontSize: 12, textAlign: 'center', lineHeight: 18, marginTop: 10 }}>
+             Можно просто написать «съел 200 г курицы», «выпил 500 мл воды» или «вешу 82,5» — я сам запишу это в приложение.
            </Text>
-           <Text style={{fontSize: 18, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 26}}>
-              Задавай любые вопросы о тренировках и питании.
-           </Text>
-        </View>
+           <View style={{ flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', marginTop: 14 }}>
+             {PERSONAS.map(p => (
+               <TouchableOpacity key={p.key} onPress={() => setCompanionPersona(p.key)} style={[personaChip, companionPersona === p.key && personaChipActive]}>
+                 <Ionicons name={p.icon} size={13} color={companionPersona === p.key ? '#fff' : COLORS.textSecondary} />
+                 <Text style={{ color: companionPersona === p.key ? '#fff' : COLORS.textSecondary, fontSize: 12, fontWeight: '700', marginLeft: 4 }}>{p.label}</Text>
+               </TouchableOpacity>
+             ))}
+           </View>
+        </ScrollView>
       ) : (
         <ScrollView style={styles.chatContainer} contentContainerStyle={{ paddingBottom: 20 }} ref={chatScrollRef} onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })} showsVerticalScrollIndicator={false}>
           {currentMessages.map(msg => (
@@ -139,7 +213,8 @@ export default function ChatScreen() {
                 ) : (
                   <Text style={[styles.chatText, styles.chatTextUser]}>{msg.text}</Text>
                 )}
-                {msg.sender === 'user' && (
+                {msg.sender === 'ai' && <ActionBadges msg={msg} />}
+                {msg.sender === 'user' && !isChatLoading && (
                   <TouchableOpacity onPress={() => startEditMessage(msg)} style={styles.editIconBtn}>
                     <Ionicons name="pencil" size={14} color="#fff" />
                   </TouchableOpacity>
@@ -169,13 +244,19 @@ export default function ChatScreen() {
       )}
 
       <View style={styles.chatInputRow}>
-        <TextInput style={styles.chatInput} placeholder="Спроси ИИ..." placeholderTextColor={COLORS.textSecondary} value={chatInput} onChangeText={setChatInput} multiline />
-        <GradientButton colors={GRADIENTS.indigo} style={styles.chatSendBtn} onPress={() => { handleSendChatMessage(chatInput); setChatInput(''); }} disabled={isChatLoading}><Ionicons name="send" size={22} color="#fff" /></GradientButton>
+        <TextInput style={styles.chatInput} placeholder="Спроси компаньона..." placeholderTextColor={COLORS.textSecondary} value={chatInput} onChangeText={setChatInput} multiline maxLength={2000} />
+        <GradientButton colors={GRADIENTS.indigo} style={styles.chatSendBtn} onPress={() => send(chatInput)} disabled={isChatLoading || !chatInput.trim()}><Ionicons name="send" size={22} color="#fff" /></GradientButton>
       </View>
     </View>
+    </KeyboardAvoid>
   );
 }
 
+const actionBadge = { flexDirection: 'row' as const, alignItems: 'center' as const, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 10, borderWidth: 1, marginRight: 6, marginBottom: 6, backgroundColor: 'rgba(255,255,255,0.03)' };
+const suggestionChip = { flexDirection: 'row' as const, alignItems: 'center' as const, backgroundColor: COLORS.card, borderRadius: 16, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 8, borderWidth: 1, borderColor: 'rgba(99,102,241,0.3)' };
+const personaChip = { flexDirection: 'row' as const, alignItems: 'center' as const, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, marginRight: 6, marginBottom: 6, backgroundColor: COLORS.cardAlt, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' };
+const personaChipActive = { backgroundColor: COLORS.indigo, borderColor: COLORS.indigo };
+const companionAvatar = { width: 68, height: 68, borderRadius: 24, backgroundColor: COLORS.indigo, alignItems: 'center' as const, justifyContent: 'center' as const, marginBottom: 14, shadowColor: COLORS.indigo, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.5, shadowRadius: 14, elevation: 8 };
 const workoutPlanCard = { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.08)' };
 const workoutPlanTitle = { color: COLORS.textPrimary, fontWeight: '800' as const, fontSize: 14, marginLeft: 6, flex: 1 };
 const workoutPlanExercises = { color: COLORS.textSecondary, fontSize: 12, marginBottom: 10, lineHeight: 17 };

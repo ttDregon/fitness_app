@@ -8,6 +8,7 @@ import { ScreenBackground } from './src/components/Gradient';
 import { BootScreen } from './src/components/BootScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { AppAlertHost } from './src/components/AppAlert';
+import { KeyboardAvoid } from './src/components/KeyboardAvoid';
 import { COLORS } from './src/theme';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -39,7 +40,7 @@ LogBox.ignoreLogs([
 ]);
 
 function Root() {
-  const { isSwitchingAccount, session, authReady, bootReady } = useApp();
+  const { isSwitchingAccount, session, authReady, bootReady, isAddingAccount } = useApp();
   // Экран загрузки показывается один раз за «холодный» запуск процесса.
   const [bootDone, setBootDone] = useState(false);
 
@@ -53,12 +54,15 @@ function Root() {
     );
   }
 
-  // Сессия проверена и её нет → экран входа.
-  if (authReady && !session) {
+  // Сессия проверена и её нет → экран входа. Он же — при «Добавить аккаунт»: текущий
+  // аккаунт остаётся залогиненным, пока не войдёшь в новый (или не нажмёшь «Отмена»).
+  if (authReady && (!session || isAddingAccount)) {
     return (
       <ScreenBackground>
         <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-        <AuthScreen />
+        <KeyboardAvoid>
+          <AuthScreen />
+        </KeyboardAvoid>
       </ScreenBackground>
     );
   }

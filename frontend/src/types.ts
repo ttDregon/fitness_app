@@ -5,16 +5,29 @@ export type Session = SupabaseSession;
 export interface WorkoutData { exercise: string; weight: number; reps: number; id?: string; completed?: boolean; }
 export interface GroupedWorkout { exercise: string; sets: WorkoutData[]; }
 export interface ScrollPickerItem { label: string; value: string | number; }
-export interface SavedAccount { id: string; email: string; name: string; role: string; password: string; }
+// Сохранённый на устройстве аккаунт для быстрого переключения. Храним refresh-токен сессии,
+// а НЕ пароль: раньше пароль лежал в AsyncStorage открытым текстом. password — только у
+// записей, сохранённых старыми версиями; при первом же входе в такой аккаунт он стирается.
+export interface SavedAccount { id: string; email: string; name: string; role: string; refreshToken?: string; password?: string; }
 export interface Group { id: string; name: string; code: string; owner_id: string; }
 export interface GroupMember { id: string; email: string; name?: string; }
 export interface WeightLog { id: string; weight: number; created_at: string; }
+// Подход из журнала + откуда он: строка workouts (_rid) и индекс в её parsed_data (_idx) —
+// чтобы удалить ошибочно записанный подход именно там, где он хранится.
+export interface JournalSet extends WorkoutData { _rid: string; _idx: number; }
 export interface WorkoutRecord { id: string; raw_text: string; parsed_data: WorkoutData[]; user_id: string; created_at: string; }
 export interface AssignedWorkout { id: string; group_id: string; client_id: string; trainer_id: string; date: string; workout_data: WorkoutData[]; }
 export interface TrainingSession { id: string; group_id: string; client_id: string; trainer_id: string; session_date: string; session_time: string; group_name?: string; client_name?: string; }
 // logged — КБЖУ, которые этот ответ ИИ записал в дневник питания (за date): при правке
 // сообщения пользователя ответы после него удаляются, и их запись откатывается.
-export interface ChatMessage { id: string; text: string; sender: 'user' | 'ai'; workoutPlan?: GeneratedWorkoutPlan; logged?: { date: string; calories: number; protein: number; fat: number; carbs: number }; }
+// rowId — строка meal_log, в которую записана эта еда (у сообщений старых версий её нет).
+// waterLogged / weightLogged — что ещё компаньон записал по этому сообщению (вода, вес).
+export interface ChatMessage {
+  id: string; text: string; sender: 'user' | 'ai'; workoutPlan?: GeneratedWorkoutPlan;
+  logged?: { date: string; calories: number; protein: number; fat: number; carbs: number; rowId?: string };
+  waterLogged?: { date: string; liters: number };
+  weightLogged?: number;
+}
 export interface ChatSession { id: string; title: string; messages: ChatMessage[]; updatedAt: number; }
 export interface Macros { protein: number; fat: number; carb: number; }
 export interface MealPreview { name: string; calories: number; protein: number; fat: number; carbs: number; }

@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Modal, Animated, Alert, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { GradientButton } from '../components/Gradient';
+import { KeyboardAvoid } from '../components/KeyboardAvoid';
 import { styles } from '../styles';
 import { COLORS, GRADIENTS } from '../theme';
 import { groupWorkoutData } from '../utils/workout';
@@ -187,12 +188,14 @@ export default function ClubScreen() {
       {isCreatingGroup && (
         <Modal transparent animationType="none" onRequestClose={() => closeAnimatedModal(setIsCreatingGroup)}>
           <Animated.View style={[styles.modalOverlay, { opacity: modalOpacityAnim }]}>
+           <KeyboardAvoid style={centered}>
             <Animated.View style={[styles.modalContent, { transform: [{ scale: modalScaleAnim }] }]}>
               <Text style={styles.modalTitle}>Название клуба</Text>
-              <TextInput style={styles.input} value={newGroupName} onChangeText={setNewGroupName} placeholder="Напр: Power Gym" placeholderTextColor={COLORS.textSecondary}/>
-              <GradientButton colors={GRADIENTS.rose} style={styles.button} onPress={createGroup}><Text style={styles.buttonText}>Создать</Text></GradientButton>
+              <TextInput style={styles.input} value={newGroupName} onChangeText={setNewGroupName} placeholder="Напр: Power Gym" placeholderTextColor={COLORS.textSecondary} maxLength={60} autoFocus/>
+              <GradientButton colors={GRADIENTS.rose} style={styles.button} onPress={createGroup} disabled={!newGroupName.trim()}><Text style={styles.buttonText}>Создать</Text></GradientButton>
               <TouchableOpacity style={{marginTop: 20}} onPress={() => closeAnimatedModal(setIsCreatingGroup)}><Text style={styles.backButtonText}>Отмена</Text></TouchableOpacity>
             </Animated.View>
+           </KeyboardAvoid>
           </Animated.View>
         </Modal>
       )}
@@ -200,12 +203,14 @@ export default function ClubScreen() {
       {isJoiningGroup && (
         <Modal transparent animationType="none" onRequestClose={() => closeAnimatedModal(setIsJoiningGroup)}>
           <Animated.View style={[styles.modalOverlay, { opacity: modalOpacityAnim }]}>
+           <KeyboardAvoid style={centered}>
             <Animated.View style={[styles.modalContent, { transform: [{ scale: modalScaleAnim }] }]}>
               <Text style={styles.modalTitle}>Код доступа</Text>
-              <TextInput style={styles.input} value={joinCode} onChangeText={setJoinCode} keyboardType="numeric" maxLength={6} placeholder="6 цифр" placeholderTextColor={COLORS.textSecondary}/>
-              <GradientButton colors={GRADIENTS.violetIndigo} style={styles.button} onPress={joinGroup}><Text style={styles.buttonText}>Подключиться</Text></GradientButton>
+              <TextInput style={[styles.input, { textAlign: 'center', fontSize: 24, letterSpacing: 6, fontWeight: '800' }]} value={joinCode} onChangeText={v => setJoinCode(v.replace(/\D/g, ''))} keyboardType="number-pad" maxLength={6} placeholder="000000" placeholderTextColor={COLORS.textMuted} autoFocus/>
+              <GradientButton colors={GRADIENTS.violetIndigo} style={styles.button} onPress={joinGroup} disabled={joinCode.length < 6}><Text style={styles.buttonText}>Подключиться</Text></GradientButton>
               <TouchableOpacity style={{marginTop: 20}} onPress={() => closeAnimatedModal(setIsJoiningGroup)}><Text style={styles.backButtonText}>Отмена</Text></TouchableOpacity>
             </Animated.View>
+           </KeyboardAvoid>
           </Animated.View>
         </Modal>
       )}
@@ -238,3 +243,4 @@ const clubIconWrap = {
   justifyContent: 'center' as const,
   marginRight: 14,
 };
+const centered = { width: '100%' as const, justifyContent: 'center' as const, alignItems: 'center' as const };

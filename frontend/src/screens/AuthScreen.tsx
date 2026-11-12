@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, LayoutAnimation } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { ScrollPicker } from '../components/ScrollPicker';
 import { GradientButton } from '../components/Gradient';
 import { ageData, heightWholeData, weightWholeData, decimalsData } from '../utils/pickers';
@@ -59,8 +60,9 @@ export default function AuthScreen() {
     userHeightWhole, setUserHeightWhole, userHeightDec, setUserHeightDec,
     userWeightWhole, setUserWeightWhole, userWeightDec, setUserWeightDec,
     targetWeightWhole, setTargetWeightWhole, targetWeightDec, setTargetWeightDec,
-    handleFinalRegister,
+    handleFinalRegister, isAddingAccount, cancelAddAccount,
   } = useApp();
+  const [showPassword, setShowPassword] = React.useState(false);
 
   // Локальный прогресс квиза — не нужен нигде за пределами этого экрана.
   const [quizStep, setQuizStep] = React.useState(0);
@@ -94,15 +96,25 @@ export default function AuthScreen() {
     return (
       <View style={styles.authContainer}>
         <Text style={styles.title}>Striva</Text>
-        <Text style={styles.subtitle}>Вход в систему</Text>
-        <TextInput style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textSecondary} value={email} onChangeText={setEmail} autoCapitalize="none" />
-        <TextInput style={styles.input} placeholder="Пароль" placeholderTextColor={COLORS.textSecondary} secureTextEntry value={password} onChangeText={setPassword} />
+        <Text style={styles.subtitle}>{isAddingAccount ? 'Добавить аккаунт' : 'Вход в систему'}</Text>
+        <TextInput style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textSecondary} value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress" autoComplete="email" returnKeyType="next" />
+        <View style={{ width: '100%', justifyContent: 'center' }}>
+          <TextInput style={[styles.input, { paddingRight: 56 }]} placeholder="Пароль" placeholderTextColor={COLORS.textSecondary} secureTextEntry={!showPassword} value={password} onChangeText={setPassword} textContentType="password" autoComplete="password" returnKeyType="go" onSubmitEditing={handleLogin} />
+          <TouchableOpacity onPress={() => setShowPassword(v => !v)} style={{ position: 'absolute', right: 14, top: 0, bottom: 15, justifyContent: 'center', padding: 4 }} accessibilityLabel={showPassword ? 'Скрыть пароль' : 'Показать пароль'}>
+            <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={22} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        </View>
         <GradientButton colors={GRADIENTS.primary} style={styles.button} onPress={handleLogin} disabled={isLoadingAuth}>
           {isLoadingAuth ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Войти</Text>}
         </GradientButton>
         <TouchableOpacity onPress={() => goQuiz('quiz_q1')} style={{marginTop: 30}}>
           <Text style={styles.linkText}>Нет аккаунта? Зарегистрироваться</Text>
         </TouchableOpacity>
+        {isAddingAccount && (
+          <TouchableOpacity onPress={cancelAddAccount} style={styles.backButton}>
+            <Text style={styles.backButtonText}>← Отмена, вернуться в приложение</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   }
@@ -163,8 +175,8 @@ export default function AuthScreen() {
       <View style={styles.authContainer}>
         <Text style={styles.title}>Регистрация</Text>
         <TextInput style={styles.input} placeholder="Ваше Имя / Никнейм" placeholderTextColor={COLORS.textSecondary} value={name} onChangeText={setName} />
-        <TextInput style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textSecondary} value={email} onChangeText={setEmail} autoCapitalize="none" />
-        <TextInput style={styles.input} placeholder="Пароль" placeholderTextColor={COLORS.textSecondary} secureTextEntry value={password} onChangeText={setPassword} />
+        <TextInput style={styles.input} placeholder="Email" placeholderTextColor={COLORS.textSecondary} value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="emailAddress" autoComplete="email" />
+        <TextInput style={styles.input} placeholder="Пароль (от 6 символов)" placeholderTextColor={COLORS.textSecondary} secureTextEntry value={password} onChangeText={setPassword} textContentType="newPassword" autoComplete="password-new" />
         <TextInput style={[styles.input, !passwordsMatch && styles.inputError]} placeholderTextColor={COLORS.textSecondary} placeholder="Подтвердите пароль" secureTextEntry value={confirmPassword} onChangeText={setConfirmPassword} />
         <GradientButton colors={GRADIENTS.primary} style={[styles.button, {marginTop: 15}]} onPress={handleCredentialsNext} disabled={isLoadingAuth || !passwordsMatch}>
           {isLoadingAuth ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Далее →</Text>}

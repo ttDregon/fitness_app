@@ -79,4 +79,22 @@ export const cancelAllScheduled = async () => {
   try { await Notifications.cancelAllScheduledNotificationsAsync(); } catch {}
 };
 
+/** Отменить одно запланированное уведомление (например, таймер отдыха). */
+export const cancelScheduled = async (identifier: string) => {
+  try { await Notifications.cancelScheduledNotificationAsync(identifier); } catch {}
+};
+
+/**
+ * Отменить только «свои» уведомления по префиксу id. Раньше синхронизация напоминаний о
+ * тренировках звала cancelAll — и заодно стирала, например, идущий таймер отдыха.
+ */
+export const cancelScheduledByPrefix = async (prefix: string) => {
+  try {
+    const all = await Notifications.getAllScheduledNotificationsAsync();
+    await Promise.all(all
+      .filter(n => n.identifier.startsWith(prefix))
+      .map(n => Notifications.cancelScheduledNotificationAsync(n.identifier).catch(() => {})));
+  } catch {}
+};
+
 export { Notifications };

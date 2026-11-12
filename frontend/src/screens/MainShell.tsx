@@ -55,7 +55,7 @@ export default function MainShell() {
               <ScrollView style={{maxHeight: 350}} showsVerticalScrollIndicator={false}>
                 {savedAccounts.map((acc: SavedAccount) => {
                   const isActive = session?.user?.id === acc.id;
-                  return ( <TouchableOpacity key={acc.id} style={[styles.accountItem, isActive && styles.accountItemActive]} onPress={() => handleSwitchAccount(acc)}><Ionicons name="person-circle" size={50} color={isActive ? COLORS.tabBar : COLORS.textSecondary} /><View style={{flex: 1, marginLeft: 15}}><Text style={styles.accName}>{acc.name}</Text><Text style={styles.accEmail}>{acc.email}</Text></View>{isActive && <Ionicons name="checkmark" size={26} color={COLORS.tabBar} />}</TouchableOpacity> )
+                  return ( <TouchableOpacity key={acc.id} style={[styles.accountItem, isActive && styles.accountItemActive]} onPress={() => handleSwitchAccount(acc)}><Ionicons name="person-circle" size={50} color={isActive ? COLORS.tabBar : COLORS.textSecondary} /><View style={{flex: 1, marginLeft: 15}}><Text style={styles.accName}>{acc.name}</Text><Text style={styles.accEmail}>{acc.email}</Text>{!isActive && !acc.refreshToken && !acc.password && <Text style={{ color: COLORS.amber, fontSize: 12, marginTop: 2 }}>нужно войти заново</Text>}</View>{isActive && <Ionicons name="checkmark" size={26} color={COLORS.tabBar} />}</TouchableOpacity> )
                 })}
                 <TouchableOpacity style={styles.addAccountBtn} onPress={handleAddAnotherAccount}><Ionicons name="person-add-outline" size={24} color={COLORS.textPrimary} /><Text style={styles.addAccountText}>Добавить аккаунт</Text></TouchableOpacity>
               </ScrollView>

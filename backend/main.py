@@ -209,6 +209,17 @@ class ChatRequest(BaseModel):
     user_id: Optional[str] = None
     daily_calorie_norm: Optional[int] = None  # уже посчитанная норма (см. frontend/src/utils/nutrition.ts)
     daily_macros: Optional[dict] = None       # {protein, fat, carb}
+    # Снимок данных приложения, собранный клиентом (журнал, рекорды, вес, питание и вода
+    # за сегодня, план тренера, расписание) — см. frontend/src/utils/companion.ts.
+    # Именно он даёт компаньону «видеть всё приложение». Старые версии его не шлют.
+    app_context: Optional[str] = None
+    persona: Optional[str] = None             # характер компаньона: friendly | strict | calm
+
+
+class BriefRequest(BaseModel):
+    app_context: str
+    persona: Optional[str] = None
+    user_id: Optional[str] = None
 
 class WorkoutLossPayload(BaseModel):
     weight: float
@@ -224,6 +235,75 @@ class WorkoutPlanRequest(BaseModel):
     muscle_group: str            # напр. "Грудь", "Спина", "Ноги", "Всё тело"
     preferences: Optional[str] = ""   # свободный текст: ограничения, инвентарь и т.п.
     user_id: Optional[str] = None
+    app_context: Optional[str] = None  # тот же снимок приложения, что и в /chat
+
+
+# Пределы на размер входа: длинный текст = дорогой промпт. 256 КБ тела (см. выше) — это
+# ~100 тыс. токенов, такого от телефона не бывает, а счёт за API растёт линейно.
+MAX_TEXT = 2000
+MAX_CONTEXT = 9000
+MAX_CHAT_MESSAGES = 24
+MAX_MESSAGE_CHARS = 4000
+
+PERSONAS = {
+    "friendly": "Тон: тёплый, поддерживающий друг-тренер. Отмечай прогресс, мягко подталкивай, можно 1–2 уместных эмодзи.",
+    "strict": "Тон: строгий требовательный тренер. Коротко, по делу, без сюсюканья и эмодзи, но с уважением. Прямо называй, где пользователь недорабатывает.",
+    "calm": "Тон: спокойный рассудительный эксперт. Объясняй «почему», без давления и восклицаний.",
+}
+
+
+def _persona(p) -> str:
+    return PERSONAS.get(p or "friendly", PERSONAS["friendly"])
+
+
+def _num(v, lo, hi, digits=None):
+    """Число из ответа ИИ (бывает строкой или мусором) → в пределах [lo, hi]."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return 0
+    if x != x:  # NaN
+        return 0
+    x = max(lo, min(x, hi))
+    return round(x, digits) if digits is not None else x
+
+
+def _clean_sets(items):
+    """Подходы из /parse: только осмысленные записи с числами, а не строками."""
+    out = []
+    for it in items if isinstance(items, list) else []:
+        if not isinstance(it, dict):
+            continue
+        name = str(it.get("exercise") or "").strip()[:80]
+        if not name:
+            continue
+        out.append({
+            "exercise": name,
+            "weight": _num(it.get("weight"), 0, 1000, 2),
+            "reps": int(_num(it.get("reps"), 0, 1000)),
+        })
+    return out[:100]
+
+
+def _clean_plan(plan):
+    """План тренировки от ИИ → строгий формат фронтенда, либо None."""
+    if not isinstance(plan, dict):
+        return None
+    exercises = []
+    for ex in plan.get("exercises") or []:
+        if not isinstance(ex, dict):
+            continue
+        name = str(ex.get("exercise") or "").strip()[:80]
+        if not name:
+            continue
+        sets = [{
+            "target_reps": int(_num(s.get("target_reps"), 0, 100)),
+            "target_weight": _num(s.get("target_weight"), 0, 500, 2),
+        } for s in (ex.get("sets") or []) if isinstance(s, dict)][:10]
+        exercises.append({"exercise": name, "sets": sets or [{"target_reps": 10, "target_weight": 0}]})
+    if not exercises:
+        return None
+    return {"plan_name": str(plan.get("plan_name") or "Тренировка").strip()[:60], "exercises": exercises[:12]}
 
 
 # Лёгкие health-роуты: ничего не вызывают (ни DeepSeek, ни Supabase), отвечают мгновенно.
@@ -298,8 +378,12 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: st
     return {"ok": True}
 
 
+# ВАЖНО: обработчики с вызовом ИИ — обычные def, а не async def. Клиенты OpenAI и Supabase
+# здесь синхронные: внутри async def запрос к DeepSeek (до 30 с) блокировал весь event loop —
+# пока один пользователь ждал ответа чата, сервер не отвечал никому, даже /health.
+# Обычный def FastAPI выполняет в пуле потоков, и запросы идут параллельно.
 @app.post("/parse")
-async def parse_workout(note: WorkoutNote, request: Request, authorization: Optional[str] = Header(default=None)):
+def parse_workout(note: WorkoutNote, request: Request, authorization: Optional[str] = Header(default=None)):
     print(f"\n--- ЗАПРОС К DEEPSEEK (ПАРСИНГ ТРЕНИРОВКИ) ---")
     uid = _guard_rate(request, authorization, note.user_id, "parse")
 
@@ -314,7 +398,7 @@ async def parse_workout(note: WorkoutNote, request: Request, authorization: Opti
     - "exercise" (строка, название упражнения)
     - "weight" (число, вес снаряда. ВАЖНО: если написано 'жим 10*10', '10х10' или '10 на 10', то первое число — это вес, а второе — повторения. Ставь 0 только если вес снаряда не указан вовсе, например 'отжимания 20'.)
     - "reps" (число, количество повторений)
-    Текст: {note.text}
+    Текст: {note.text[:MAX_TEXT]}
     """
     
     try:
@@ -334,7 +418,7 @@ async def parse_workout(note: WorkoutNote, request: Request, authorization: Opti
             _inc_usage(uid, "workout", used, exists)
         return {
             "status": "success",
-            "parsed_data": parsed_json.get("workouts", [])
+            "parsed_data": _clean_sets(parsed_json.get("workouts", []))
         }
     except Exception as e:
         print(f"❌ Ошибка парсинга: {e}")
@@ -366,7 +450,7 @@ def _summarize_workout_history(uid: str, muscle_group: str) -> str:
 
 
 @app.post("/generate_workout_plan")
-async def generate_workout_plan(req: WorkoutPlanRequest, request: Request, authorization: Optional[str] = Header(default=None)):
+def generate_workout_plan(req: WorkoutPlanRequest, request: Request, authorization: Optional[str] = Header(default=None)):
     print(f"\n--- ЗАПРОС К DEEPSEEK (ГЕНЕРАЦИЯ ПЛАНА ТРЕНИРОВКИ) ---")
     uid = _guard_rate(request, authorization, req.user_id, "workout_plan")
 
@@ -374,11 +458,14 @@ async def generate_workout_plan(req: WorkoutPlanRequest, request: Request, autho
     if not ok:
         return {"status": "limit_reached", "kind": "plan", "limit": AI_FREE_PARSE}
 
-    history_summary = _summarize_workout_history(uid, req.muscle_group) if uid else ""
+    if req.app_context:
+        history_summary = "КОНТЕКСТ ПРИЛОЖЕНИЯ ПОЛЬЗОВАТЕЛЯ:\n" + req.app_context[:MAX_CONTEXT]
+    else:
+        history_summary = _summarize_workout_history(uid, req.muscle_group) if uid else ""
 
     prompt = f"""
-    Составь тренировку для группы мышц/комплекса: "{req.muscle_group}".
-    Предпочтения и ограничения пользователя: "{req.preferences or 'нет особых пожеланий'}".
+    Составь тренировку для группы мышц/комплекса: "{req.muscle_group[:60]}".
+    Предпочтения и ограничения пользователя: "{(req.preferences or 'нет особых пожеланий')[:500]}".
 
     {history_summary}
 
@@ -411,10 +498,12 @@ async def generate_workout_plan(req: WorkoutPlanRequest, request: Request, autho
         )
         raw = response.choices[0].message.content
         cleaned = re.sub(r'```json|```', '', raw).strip()
-        parsed = json.loads(cleaned)
+        plan = _clean_plan(json.loads(cleaned))
+        if not plan:
+            raise ValueError("пустой план")
         if uid:
             _inc_usage(uid, "plan", used, exists)
-        return {"status": "success", "plan": parsed}
+        return {"status": "success", "plan": plan}
     except Exception as e:
         print(f"❌ Ошибка генерации плана: {e}")
         raise HTTPException(status_code=500, detail="Ошибка обработки запроса")
@@ -435,8 +524,8 @@ def _clamp_food_item(it: dict) -> dict:
 
 
 @app.post("/parse_meals")
-async def parse_meals(data: dict, request: Request, authorization: Optional[str] = Header(default=None)):
-    text = data.get("text", "")
+def parse_meals(data: dict, request: Request, authorization: Optional[str] = Header(default=None)):
+    text = str(data.get("text") or "")[:MAX_TEXT]
     uid = _guard_rate(request, authorization, data.get("user_id"), "meals")
 
     ok, used, exists = _check_ai(uid, "meal", AI_FREE_PARSE)
@@ -530,8 +619,8 @@ async def notify(req: NotifyRequest, request: Request, authorization: Optional[s
 
         messages = [{
             "to": t,
-            "title": req.title,
-            "body": req.body,
+            "title": req.title[:120],
+            "body": req.body[:500],
             "data": req.data or {},
             "sound": "default",
             "channelId": "default",
@@ -550,9 +639,54 @@ async def notify(req: NotifyRequest, request: Request, authorization: Optional[s
         return {"status": "error", "detail": str(e)}
 
 
+def _profile_context(uid, req_norm=None, req_macros=None) -> str:
+    """Профиль из БД (рост/возраст/пол — их нет в снимке клиента) + норма КБЖУ с клиента."""
+    try:
+        response = supabase.table("profiles").select("*").eq("id", uid).execute()
+        if not response.data:
+            return ""
+        profile = response.data[0]
+        name = profile.get("name", "Пользователь")
+        goal_raw = profile.get("goal", "")
+        goal = "Похудение" if goal_raw == "lose" else "Набор массы" if goal_raw == "gain" else "Поддержание веса"
+        weight, height, age, gender = profile.get("weight"), profile.get("height"), profile.get("age"), profile.get("gender")
+        ctx = f"ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ:\n- Имя: {name}\n- Цель: {goal}\n"
+        if profile.get("target_weight"):
+            ctx += f"- Целевой вес: {profile.get('target_weight')} кг\n"
+        if weight and height and age and gender:
+            ctx += f"- Вес: {weight} кг, рост: {height} см, возраст: {age}, пол: {gender}\n"
+        if profile.get("workouts_per_week"):
+            ctx += f"- Тренировок в неделю (по анкете): {profile.get('workouts_per_week')}\n"
+        if req_norm:
+            ctx += f"- Дневная норма калорий: {req_norm} ккал\n"
+        if isinstance(req_macros, dict):
+            ctx += f"- Дневная норма БЖУ: белки {req_macros.get('protein')}г, жиры {req_macros.get('fat')}г, углеводы {req_macros.get('carb')}г\n"
+        return ctx
+    except Exception:
+        return ""
+
+
+COMPANION_IDENTITY = """
+Ты — Striva, личный ИИ-компаньон пользователя в фитнес-приложении Striva: персональный тренер
+и нутрициолог в одном лице. Помогаешь ТОЛЬКО по темам спорта, тренировок, питания, веса,
+восстановления и здоровых привычек.
+
+У тебя есть доступ к данным приложения пользователя — они ниже, в блоках ИНФОРМАЦИЯ О
+ПОЛЬЗОВАТЕЛЕ и КОНТЕКСТ ПРИЛОЖЕНИЯ (журнал тренировок с датами, рекорды, какие группы мышц
+когда тренировались, вес и его динамика, питание и вода за сегодня, план от тренера,
+расписание). Это и есть «твоя память» о пользователе:
+- Когда просят пересмотреть/проанализировать тренировки, питание, вес или прогресс — разбирай
+  КОНКРЕТНЫЕ цифры и даты из контекста (что, когда, с каким весом), а не общие слова.
+- Не переспрашивай то, что уже есть в контексте. Никогда не говори, что у тебя нет доступа к
+  данным, если они есть в контексте.
+- Если данных правда нет (например, журнал пуст) — честно скажи об этом и предложи, с чего начать.
+- Обращайся по имени, отвечай по-русски, структурно и без воды: короткие абзацы или списки.
+"""
+
+
 @app.post("/chat")
-async def chat_assistant(req: ChatRequest, request: Request, authorization: Optional[str] = Header(default=None)):
-    print(f"\n--- ЗАПРОС К DEEPSEEK (ЧАТ С ПАМЯТЬЮ) ---")
+def chat_assistant(req: ChatRequest, request: Request, authorization: Optional[str] = Header(default=None)):
+    print(f"\n--- ЗАПРОС К DEEPSEEK (ЧАТ-КОМПАНЬОН) ---")
     uid = _guard_rate(request, authorization, req.user_id, "chat")
 
     # Дневной лимит ИИ-чата (одинаковый для всех — оплаты в приложении нет).
@@ -565,39 +699,30 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
 
     user_context = ""
     if uid:
-        try:
-            response = supabase.table("profiles").select("*").eq("id", uid).execute()
-            if response.data:
-                profile = response.data[0]
+        user_context = _profile_context(uid, req.daily_calorie_norm, req.daily_macros)
+    if req.app_context:
+        user_context += "\nКОНТЕКСТ ПРИЛОЖЕНИЯ (актуальные данные пользователя на момент сообщения):\n" + req.app_context[:MAX_CONTEXT] + "\n"
+    elif uid:
+        # Старые версии приложения не шлют снимок — хотя бы журнал тренировок из БД.
+        user_context += f"\n{_summarize_workout_history(uid, '')}\n"
 
-                name = profile.get("name", "Пользователь")
-                goal_raw = profile.get("goal", "")
-                goal = "Похудение" if goal_raw == "lose" else "Набор массы" if goal_raw == "gain" else "Поддержание веса"
-                weight, height, age, gender = profile.get("weight"), profile.get("height"), profile.get("age"), profile.get("gender")
-
-                user_context = f"""
-ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ:
-- Имя: {name}
-- Цель: {goal}
-"""
-                if weight and height and age and gender:
-                    user_context += f"- Вес: {weight} кг, рост: {height} см, возраст: {age}, пол: {gender}\n"
-                if req.daily_calorie_norm:
-                    user_context += f"- Дневная норма калорий: {req.daily_calorie_norm} ккал\n"
-                if req.daily_macros:
-                    m = req.daily_macros
-                    user_context += f"- Дневная норма БЖУ: белки {m.get('protein')}г, жиры {m.get('fat')}г, углеводы {m.get('carb')}г\n"
-        except Exception as db_err:
-            pass
-
-        # Личный журнал тренировок (реальный вес/повторы) — чтобы на "составь тренировку
-        # исходя из прошлого раза" чат отвечал по факту, а не переспрашивал вслепую.
-        history_summary = _summarize_workout_history(uid, "")
-        user_context += f"\n{history_summary}\n"
+    # Действия «записать воду / вес» умеет выполнять только новая версия приложения — её
+    # признак: она шлёт app_context. Старой версии (пока до неё не дошло обновление) эти
+    # правила не даём: иначе ИИ отвечал бы «записал воду», а приложение ничего не записывало.
+    supports_actions = req.app_context is not None
+    action_fields = """
+        "log_water_ml": 0,
+        "log_weight_kg": 0,""" if supports_actions else ""
+    action_rule = """
+    ПРАВИЛО 2.1 (ВОДА И ВЕС — ДЕЙСТВИЯ В ПРИЛОЖЕНИИ):
+    - "log_water_ml": ставь число миллилитров ТОЛЬКО если пользователь сообщает, что ВЫПИЛ воду ("выпил 500 мл воды", "выпил стакан воды" → 250, "выпил бутылку воды 0.5" → 500). Иначе 0. Чай/кофе/сок водой не считаются.
+    - "log_weight_kg": ставь число ТОЛЬКО если пользователь сообщает свой ТЕКУЩИЙ вес ("я вешу 82.5", "сегодня взвесился — 80 кг"). Для желаемого/прошлого веса и вопросов — 0.
+    - Если записываешь воду или вес — коротко подтверди это в "reply".
+""" if supports_actions else ""
 
     system_prompt = f"""
-    Ты — профессиональный фитнес-ассистент и нутрициолог.
-    Твоя задача — помогать пользователю ТОЛЬКО по вопросам спорта, фитнеса, тренировок, записей питания, нутрициологии.
+    {COMPANION_IDENTITY}
+    {_persona(req.persona)}
 
     {user_context}
 
@@ -608,7 +733,7 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
         "calories": 0,
         "protein": 0,
         "fat": 0,
-        "carbs": 0,
+        "carbs": 0,{action_fields}
         "workout_plan": null
     }}
 
@@ -623,47 +748,49 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
       * "сколько калорий в яблоке?" → should_log_meal: false, calories: 0
       * "можно ли пиццу?" → should_log_meal: false, calories: 0
       * "что будет если съем курицу?" → should_log_meal: false, calories: 0
-      * "сколько ккал in 200г курицы?" → should_log_meal: false, calories: 0
       * "хочу съесть пиццу" → should_log_meal: false, calories: 0
 
-    - Если should_log_meal: true, обязательно заполни calories, protein, fat, carbs примерными значениями для указанного продукта/блюда.
+    - Если should_log_meal: true, обязательно заполни calories, protein, fat, carbs примерными значениями для указанного продукта/блюда, а в "reply" коротко подтверди, что записал, и как это вписывается в норму на сегодня (по КОНТЕКСТУ ПРИЛОЖЕНИЯ).
     - Если should_log_meal: false, оставь все нутриенты равными 0.
+{action_rule}
+    ПРАВИЛО 3: Если вопрос НЕ относится к спорту, питанию, весу или восстановлению, в "reply" напиши "К сожалению я не могу вам с этим помочь", а остальные поля оставь по умолчанию.
 
-    ПРАВИЛО 3: Если вопрос НЕ относится к спорту или питанию, в "reply" напиши "К сожалению я не могу вам с этим помочь", а should_log_meal: false and нутриенты 0.
+    ПРАВИЛО 4 (ГРУНТУЙ СОВЕТЫ В ЦИФРАХ ПОЛЬЗОВАТЕЛЯ): Если указаны дневная норма калорий и БЖУ — любые твои рекомендации по количеству белка/жиров/углеводов/калорий должны опираться ИМЕННО на эти цифры и на то, сколько уже съедено сегодня (например "до нормы белка осталось ~60г"). Никогда не называй суточную норму белка выше нормы из контекста.
 
-    ПРАВИЛО 4 (ГРУНТУЙ СОВЕТЫ В ЦИФРАХ ПОЛЬЗОВАТЕЛЯ): Если в ИНФОРМАЦИИ О ПОЛЬЗОВАТЕЛЕ указаны дневная норма калорий и БЖУ — любые твои рекомендации по количеству белка/жиров/углеводов/калорий должны опираться ИМЕННО на эти цифры (например "тебе на сегодня нужно ~150г белка"), а не придумываться заново. Никогда не называй суточную норму белка выше нормы из контекста.
+    ПРАВИЛО 5 (ТРЕНИРОВКА НА СЕГОДНЯ / "КАК В ПРОШЛЫЙ РАЗ"): Если пользователь просит пересмотреть его тренировки, посоветовать, что делать сегодня, или составить тренировку на основе прошлых — НЕ переспрашивай: сам посмотри по журналу, какие группы мышц и когда работали, сколько дней прошло, и предложи то, что логично сегодня (не та же группа мышц, что вчера; давно не тренированные группы — в приоритете; если был тяжёлый блок подряд — можно день отдыха или лёгкое кардио). Дай конкретику: упражнения, подходы, вес, повторы, умеренно прогрессируя относительно последних цифр из журнала (+2.5-5кг или +1 повтор, если прошлая нагрузка выглядит выполнимой). Если тренер назначил план на сегодня — учитывай его в первую очередь. Коротко объясни, почему именно это. Если записей в журнале нет — уточни цель и предложи щадящий стартовый вариант.
 
-    ПРАВИЛО 5 (ТРЕНИРОВКА "КАК В ПРОШЛЫЙ РАЗ"): Выше, в ИНФОРМАЦИИ О ПОЛЬЗОВАТЕЛЕ, есть блок с последними записями его личного журнала (реальные упражнения, вес и повторы). Если пользователь просит составить/предложить тренировку на основе того, что он делал в прошлый раз — НЕ переспрашивай, какая это была группа мышц или сколько времени прошло: сам определи по датам и списку упражнений в журнале и сразу дай конкретную тренировку (упражнения, подходы, вес, повторы), умеренно прогрессируя относительно последних цифр (+2.5-5кг или +1 повтор, если предыдущая нагрузка выглядит выполнимой). Если записей в журнале вообще нет — тогда уточни группу мышц и предложи щадящий стартовый вариант.
-
-    ПРАВИЛО 6 (СТРУКТУРИРОВАННЫЙ ПЛАН ДЛЯ ЖУРНАЛА): Каждый раз, когда в "reply" ты предлагаешь КОНКРЕТНУЮ тренировку (список упражнений с подходами/весом/повторами — будь то по правилу 5 или по любой другой просьбе типа "составь тренировку на грудь") — ОБЯЗАТЕЛЬНО продублируй её машиночитаемо в поле "workout_plan", СТРОГО в этом формате:
+    ПРАВИЛО 6 (СТРУКТУРИРОВАННЫЙ ПЛАН ДЛЯ ЖУРНАЛА): Каждый раз, когда в "reply" ты предлагаешь КОНКРЕТНУЮ тренировку (список упражнений с подходами/весом/повторами) — ОБЯЗАТЕЛЬНО продублируй её машиночитаемо в поле "workout_plan", СТРОГО в этом формате:
     {{
         "plan_name": "Короткое название",
         "exercises": [
             {{ "exercise": "Название упражнения", "sets": [ {{ "target_reps": 8, "target_weight": 40 }} ] }}
         ]
     }}
-    Данные в "workout_plan" должны точно соответствовать тому, что написано в "reply" (те же упражнения, подходы, вес). Если в этом сообщении ты НЕ предлагаешь конкретную тренировку (общий вопрос, совет без списка упражнений и т.п.) — оставь "workout_plan": null.
+    Данные в "workout_plan" должны точно соответствовать тому, что написано в "reply". Если в этом сообщении ты НЕ предлагаешь конкретную тренировку — оставь "workout_plan": null. Под планом у пользователя появится кнопка «Добавить в тренировку» — можешь упомянуть её.
     """
-    
+
     api_messages = [{"role": "system", "content": system_prompt}]
-    
-    for msg in req.messages:
+
+    # В ИИ уходит только хвост диалога: история длиной в сотни сообщений — это и деньги
+    # (каждое сообщение пересылает всю историю), и размытый контекст для модели.
+    for msg in req.messages[-MAX_CHAT_MESSAGES:]:
         if msg.role not in ("user", "assistant"):
             continue  # "system" из тела запроса подменил бы наш системный промпт
+        content = (msg.content or "")[:MAX_MESSAGE_CHARS]
         if msg.role == "assistant":
-            simulated_json = json.dumps({"reply": msg.content, "calories": 0, "protein": 0, "fat": 0, "carbs": 0})
+            simulated_json = json.dumps({"reply": content, "calories": 0, "protein": 0, "fat": 0, "carbs": 0}, ensure_ascii=False)
             api_messages.append({"role": "assistant", "content": simulated_json})
         else:
-            api_messages.append({"role": msg.role, "content": msg.content})
-            
+            api_messages.append({"role": "user", "content": content})
+
     try:
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=api_messages,
             response_format={"type": "json_object"},
-            temperature=0.6 
+            temperature=0.6
         )
-        
+
         raw_reply = response.choices[0].message.content
         parsed_reply = json.loads(raw_reply)
 
@@ -672,9 +799,7 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
 
         # Подстраховка от кривого workout_plan (не тот тип, пустой список и т.п.) —
         # лучше молча отбросить его, чем уронить фронтенд на некорректных данных.
-        workout_plan = parsed_reply.get("workout_plan")
-        if not (isinstance(workout_plan, dict) and isinstance(workout_plan.get("exercises"), list) and workout_plan.get("exercises")):
-            workout_plan = None
+        workout_plan = _clean_plan(parsed_reply.get("workout_plan"))
 
         # Приложение записывает в дневник всё, где calories > 0. ИИ иногда заполняет КБЖУ и на
         # вопрос («сколько калорий в пицце?»), ставя should_log_meal: false — такое обнуляем,
@@ -686,11 +811,74 @@ async def chat_assistant(req: ChatRequest, request: Request, authorization: Opti
             except (TypeError, ValueError):
                 pass
 
+        # Действия «вода» и «вес»: пределы от галлюцинаций (3 л за раз, 25–300 кг).
+        water_ml = int(_num(parsed_reply.get("log_water_ml"), 0, 3000)) if supports_actions else 0
+        weight_kg = _num(parsed_reply.get("log_weight_kg"), 0, 300, 2) if supports_actions else 0
+        if weight_kg < 25:
+            weight_kg = 0
+
         return {
             "reply": parsed_reply.get("reply", "Ошибка формата"),
             **food,
+            "water_ml": water_ml,
+            "weight_kg": weight_kg,
             "workout_plan": workout_plan,
         }
     except Exception as e:
         print(f"❌ Ошибка чата: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка обработки запроса")
+
+
+# Совет компаньона на день для карточки на главном экране. Клиент кэширует ответ на день,
+# так что обычно это 1 запрос в сутки; учитывается в том же дневном лимите, что и чат.
+@app.post("/companion/brief")
+def companion_brief(req: BriefRequest, request: Request, authorization: Optional[str] = Header(default=None)):
+    uid = _guard_rate(request, authorization, req.user_id, "brief")
+    used, exists = 0, False
+    if uid:
+        ok, used, exists = _check_ai(uid, "chat", AI_FREE_CHAT)
+        if not ok:
+            return {"status": "limit_reached", "limit": AI_FREE_CHAT}
+
+    profile = _profile_context(uid) if uid else ""
+    prompt = f"""
+    {COMPANION_IDENTITY}
+    {_persona(req.persona)}
+
+    {profile}
+    КОНТЕКСТ ПРИЛОЖЕНИЯ:
+    {req.app_context[:MAX_CONTEXT]}
+
+    Сделай короткую сводку дня для карточки на главном экране: оцени последние дни пользователя
+    (тренировки, питание, вода, вес) и дай ОДИН конкретный совет, что сделать сегодня. Опирайся
+    только на данные выше, с конкретными цифрами. Без приветствий в стиле «Привет, я ИИ».
+
+    Верни ТОЛЬКО валидный JSON:
+    {{
+      "headline": "заголовок до 50 символов",
+      "message": "2–3 коротких предложения: что заметил по данным + конкретный совет на сегодня",
+      "suggestion": "короткий вопрос (до 60 символов) от лица пользователя, который логично задать тебе дальше"
+    }}
+    """
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "You output valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.7,
+        )
+        parsed = json.loads(response.choices[0].message.content)
+        if uid:
+            _inc_usage(uid, "chat", used, exists)
+        return {
+            "status": "success",
+            "headline": str(parsed.get("headline") or "Совет на сегодня")[:80],
+            "message": str(parsed.get("message") or "")[:600],
+            "suggestion": str(parsed.get("suggestion") or "Что мне сделать сегодня?")[:90],
+        }
+    except Exception as e:
+        print(f"❌ Ошибка сводки компаньона: {e}")
         raise HTTPException(status_code=500, detail="Ошибка обработки запроса")

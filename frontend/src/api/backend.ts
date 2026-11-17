@@ -17,7 +17,7 @@ async function authHeaders(): Promise<Record<string, string>> {
 export const getBackendUrl = (): string => {
   // Вставь сюда публичный URL туннеля (например, VS Code Ports, ngrok, localtunnel), если используешь его.
   // Пример: const TUNNEL_URL = 'https://xxxx-8000.app.online.visualstudio.com';
-  const TUNNEL_URL = 'https://fitness-app-backend-4q04.onrender.com';
+  const TUNNEL_URL = 'https://fitness-app-backend-5p49.onrender.com';
   if (TUNNEL_URL) return TUNNEL_URL;
 
   // Иначе используй локальный IP-адрес компьютера

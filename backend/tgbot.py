@@ -26,7 +26,7 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # тот же service_role, что и 
 PUBLIC_URL = (
     os.getenv("RENDER_EXTERNAL_URL")
     or os.getenv("PUBLIC_BACKEND_URL")
-    or "https://fitness-app-backend-4q04.onrender.com"
+    or "https://fitness-app-backend-5p49.onrender.com"
 ).rstrip("/")
 
 enabled = bool(BOT_TOKEN and SUPABASE_URL and SUPABASE_KEY)

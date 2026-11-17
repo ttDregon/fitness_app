@@ -12,6 +12,7 @@
     "expo-dev-client": "~55.0.40",
     "expo-device": "~55.0.21",
     "expo-font": "~55.0.8",
+    "expo-iap": "6.4.3",
     "expo-navigation-bar": "~55.0.17",
     "expo-notifications": "~55.0.27",
     "expo-status-bar": "~55.0.6",

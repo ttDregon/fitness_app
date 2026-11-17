@@ -3,7 +3,7 @@
     "name": "Striva",
     "slug": "my-safe-app",
     "scheme": "mysafeapp",
-    "version": "1.0.2",
+    "version": "1.1.0",
     "sdkVersion": "55.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -31,6 +31,7 @@
     },
     "plugins": [
       "./plugins/withAndroidReleaseSigning",
+      "expo-iap",
       [
         "expo-notifications",
         {
@@ -49,7 +50,7 @@
         "expo-channel-name": "production"
       }
     },
-    "runtimeVersion": "2.0.0",
+    "runtimeVersion": "2.1.0",
     "owner": "ttdregon"
   }
 }

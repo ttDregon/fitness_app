@@ -2,14 +2,17 @@ import React from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { styles } from '../styles';
-import { COLORS } from '../theme';
+import { COLORS, GRADIENTS } from '../theme';
 import { useApp } from '../context/AppContext';
 import { goalProgressPct } from '../utils/goal';
+import { formatPremiumDate } from '../utils/premium';
+import { GradientView } from '../components/Gradient';
 
 export default function ProfileScreen() {
   const {
     displayName, userRole, userGoal, currentWeight, targetWeight, startWeight, waterIntake,
     handleTabChange, openAnimatedModal, setIsAccountSwitcherVisible, handleSignOut, handleDeleteAccount,
+    isPremium, premiumUntil, autoRenewing, openPaywall,
   } = useApp();
 
   const goalMap: Record<string, string> = { lose: 'Похудение', gain: 'Набор массы', maintain: 'Поддержание формы' };
@@ -67,6 +70,26 @@ export default function ProfileScreen() {
             </View>
           </View>
         </View>
+
+        {/* Статус Премиума: активен — до какой даты; нет — вход в тарифы. */}
+        <TouchableOpacity activeOpacity={0.88} onPress={() => openPaywall('profile')} style={{ marginBottom: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: isPremium ? 'rgba(52,211,153,0.35)' : 'rgba(232,121,249,0.38)' }}>
+            <GradientView colors={GRADIENTS.violetPink} style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginRight: 14 }}>
+              <Ionicons name="diamond" size={20} color="#fff" />
+            </GradientView>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' }}>Striva Премиум</Text>
+              <Text style={{ color: isPremium ? COLORS.emerald : COLORS.textSecondary, fontSize: 13, marginTop: 2 }}>
+                {isPremium
+                  ? `Активен до ${formatPremiumDate(premiumUntil)}${autoRenewing ? ' · продлится сам' : ''}`
+                  : 'Больше ИИ и инструменты тренера'}
+              </Text>
+            </View>
+            {isPremium
+              ? <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+              : <Text style={{ color: COLORS.fuchsia, fontSize: 14, fontWeight: '800' }}>Оформить</Text>}
+          </View>
+        </TouchableOpacity>
 
         <TouchableOpacity style={rowBtn} onPress={() => openAnimatedModal(setIsAccountSwitcherVisible)}>
           <Ionicons name="swap-horizontal-outline" size={24} color={COLORS.textPrimary} style={{ marginRight: 14 }} />

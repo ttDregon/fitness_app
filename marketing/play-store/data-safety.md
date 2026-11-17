@@ -18,9 +18,13 @@ Play Console → «Расти» → «Безопасность данных» (D
 | Messages → In-app messages (или App activity, зависит от версии формы) | сообщения ИИ-чата | ✅ (только на устройстве, см. ниже) | ❌ | Опционально | Работа ИИ-ассистента |
 | App activity → App interactions         | записи питания, история использования       | ✅ | ❌ | Обязательно | Основная функция приложения |
 | Device or other IDs                     | push-токен устройства (Expo push token)      | ✅ | ❌ | Опционально | Доставка напоминаний |
+| Financial info → Purchase history       | подписка Striva Премиум: тариф, срок, статус, номер заказа Google Play и токен покупки (с версии 1.1.0) | ✅ | ❌ | Опционально | Работа приложения (выдача Премиума), управление аккаунтом |
 
-**Financial info, Location, Photos/Videos, Contacts, Calendar, Web browsing —
-НЕ собираются вообще.**
+**Платёжные данные (карта, адрес) приложение не видит и не хранит** — оплату целиком проводит
+Google Play. Мы храним только факт подписки (`billing_purchases`, `profiles.premium_*`, см.
+`db/phase8_premium.sql`), а бэкенд проверяет её в Google Play Developer API.
+
+**Location, Photos/Videos, Contacts, Calendar, Web browsing — НЕ собираются вообще.**
 
 ## "Передаётся третьим лицам" (Data sharing)
 

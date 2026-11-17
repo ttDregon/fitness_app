@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StatusBar, Modal, Animated, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TabErrorBoundary } from '../components/TabErrorBoundary';
+import { PremiumPaywall } from '../components/PremiumPaywall';
 import { ScreenBackground, GradientView } from '../components/Gradient';
 import { styles } from '../styles';
 import { COLORS, GRADIENTS } from '../theme';
@@ -63,6 +64,8 @@ export default function MainShell() {
           </Animated.View>
         </Modal>
       )}
+
+      <PremiumPaywall />
 
       <View style={[styles.tabBar, { paddingBottom: Platform.OS === 'ios' ? 35 : 20, paddingTop: 15 }]}>
         <TouchableOpacity style={styles.tabItem} onPress={() => handleTabChange('chat')}><Ionicons name={currentTab === 'chat' ? "chatbubble" : "chatbubble-outline"} size={28} color={currentTab === 'chat' ? COLORS.indigo : COLORS.textSecondary} /></TouchableOpacity>

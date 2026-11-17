@@ -6,7 +6,7 @@ import time
 import httpx
 import jwt
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import tgbot  # Telegram-бот оплаты (вебхук). Безопасен при отсутствии BOT_TOKEN.
+import billing  # Премиум через Google Play Billing. Безопасен без GOOGLE_PLAY_SERVICE_ACCOUNT_JSON.
 
 app = FastAPI()
 
@@ -66,9 +67,12 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- ЛИМИТЫ ИИ (считаются на сервере, нельзя обойти из приложения) ---
-# Приложение бесплатное для всех — лимиты только чтобы не улететь по счёту за API.
+# Бесплатно — как и раньше; Премиум (Google Play) поднимает лимиты. Совсем без лимита не
+# делаем даже для Премиума: защита от скриптов, которые выжгут счёт за API.
 AI_FREE_CHAT = 30           # чат: 30 сообщений/день
-AI_FREE_PARSE = 15          # разбор еды и тренировок: 15/день каждый, всегда
+AI_FREE_PARSE = 15          # разбор еды, тренировок и ИИ-планы: 15/день каждый
+AI_PREMIUM_CHAT = 200
+AI_PREMIUM_PARSE = 100
 
 def _today():
     return datetime.now(timezone.utc).date().isoformat()
@@ -105,6 +109,50 @@ def _check_ai(uid: str, kind: str, limit: int):
     if used >= limit:
         return False, used, exists
     return True, used, exists
+
+
+# --- ПРЕМИУМ ---
+# premium_until пишет только бэкенд (service_role) после проверки покупки в Google Play;
+# из приложения это поле не изменить — см. db/phase8_premium.sql (триггер).
+_PREMIUM_CACHE = {}      # uid -> (когда_перечитать, premium_until | None)
+_PREMIUM_CACHE_TTL = 60  # с — лимиты проверяются на каждый запрос к ИИ
+
+
+def _first_row(data):
+    if isinstance(data, list):
+        return data[0] if data else None
+    return data if isinstance(data, dict) else None
+
+
+def _premium_until(uid: str, fresh: bool = False):
+    if not uid:
+        return None
+    now = time.time()
+    hit = _PREMIUM_CACHE.get(uid)
+    if hit and hit[0] > now and not fresh:
+        return hit[1]
+    until = None
+    try:
+        res = supabase.table("profiles").select("premium_until").eq("id", uid).limit(1).execute()
+        row = _first_row(res.data)
+        until = _parse_dt(row.get("premium_until")) if row and row.get("premium_until") else None
+    except Exception:
+        until = hit[1] if hit else None  # колонки ещё нет / сбой БД → считаем как было
+    if len(_PREMIUM_CACHE) > 20000:
+        _PREMIUM_CACHE.clear()
+    _PREMIUM_CACHE[uid] = (now + _PREMIUM_CACHE_TTL, until)
+    return until
+
+
+def _is_premium(uid: str) -> bool:
+    until = _premium_until(uid)
+    return bool(until and until > datetime.now(timezone.utc))
+
+
+def _ai_limits(uid: str) -> dict:
+    if _is_premium(uid):
+        return {"premium": True, "chat": AI_PREMIUM_CHAT, "parse": AI_PREMIUM_PARSE}
+    return {"premium": False, "chat": AI_FREE_CHAT, "parse": AI_FREE_PARSE}
 
 # --- АУТЕНТИФИКАЦИЯ И ЗАЩИТА ОТ ЗЛОУПОТРЕБЛЕНИЙ ---
 # JWT-секрет проекта Supabase (Settings → API → JWT Secret). Если ЗАДАН — бэкенд
@@ -387,9 +435,10 @@ def parse_workout(note: WorkoutNote, request: Request, authorization: Optional[s
     print(f"\n--- ЗАПРОС К DEEPSEEK (ПАРСИНГ ТРЕНИРОВКИ) ---")
     uid = _guard_rate(request, authorization, note.user_id, "parse")
 
-    ok, used, exists = _check_ai(uid, "workout", AI_FREE_PARSE)
+    lim = _ai_limits(uid)
+    ok, used, exists = _check_ai(uid, "workout", lim["parse"])
     if not ok:
-        return {"status": "limit_reached", "kind": "workout", "limit": AI_FREE_PARSE, "parsed_data": []}
+        return {"status": "limit_reached", "kind": "workout", "limit": lim["parse"], "premium": lim["premium"], "parsed_data": []}
 
     prompt = f"""
     Проанализируй текст тренировки и верни результат СТРОГО в формате JSON.
@@ -454,9 +503,10 @@ def generate_workout_plan(req: WorkoutPlanRequest, request: Request, authorizati
     print(f"\n--- ЗАПРОС К DEEPSEEK (ГЕНЕРАЦИЯ ПЛАНА ТРЕНИРОВКИ) ---")
     uid = _guard_rate(request, authorization, req.user_id, "workout_plan")
 
-    ok, used, exists = _check_ai(uid, "plan", AI_FREE_PARSE)
+    lim = _ai_limits(uid)
+    ok, used, exists = _check_ai(uid, "plan", lim["parse"])
     if not ok:
-        return {"status": "limit_reached", "kind": "plan", "limit": AI_FREE_PARSE}
+        return {"status": "limit_reached", "kind": "plan", "limit": lim["parse"], "premium": lim["premium"]}
 
     if req.app_context:
         history_summary = "КОНТЕКСТ ПРИЛОЖЕНИЯ ПОЛЬЗОВАТЕЛЯ:\n" + req.app_context[:MAX_CONTEXT]
@@ -528,9 +578,10 @@ def parse_meals(data: dict, request: Request, authorization: Optional[str] = Hea
     text = str(data.get("text") or "")[:MAX_TEXT]
     uid = _guard_rate(request, authorization, data.get("user_id"), "meals")
 
-    ok, used, exists = _check_ai(uid, "meal", AI_FREE_PARSE)
+    lim = _ai_limits(uid)
+    ok, used, exists = _check_ai(uid, "meal", lim["parse"])
     if not ok:
-        return {"status": "limit_reached", "kind": "meal", "limit": AI_FREE_PARSE, "meals": []}
+        return {"status": "limit_reached", "kind": "meal", "limit": lim["parse"], "premium": lim["premium"], "meals": []}
 
     prompt = f"""
     Проанализируй, что съел человек или что назначено в меню: "{text}".
@@ -689,12 +740,13 @@ def chat_assistant(req: ChatRequest, request: Request, authorization: Optional[s
     print(f"\n--- ЗАПРОС К DEEPSEEK (ЧАТ-КОМПАНЬОН) ---")
     uid = _guard_rate(request, authorization, req.user_id, "chat")
 
-    # Дневной лимит ИИ-чата (одинаковый для всех — оплаты в приложении нет).
+    # Дневной лимит ИИ-чата: бесплатный или повышенный (Премиум).
     chat_used, chat_exists = 0, False
     if uid:
-        ok, chat_used, chat_exists = _check_ai(uid, "chat", AI_FREE_CHAT)
+        lim = _ai_limits(uid)
+        ok, chat_used, chat_exists = _check_ai(uid, "chat", lim["chat"])
         if not ok:
-            return {"limit_reached": True, "kind": "chat", "limit": AI_FREE_CHAT,
+            return {"limit_reached": True, "kind": "chat", "limit": lim["chat"], "premium": lim["premium"],
                     "reply": "", "calories": 0, "protein": 0, "fat": 0, "carbs": 0}
 
     user_context = ""
@@ -836,9 +888,10 @@ def companion_brief(req: BriefRequest, request: Request, authorization: Optional
     uid = _guard_rate(request, authorization, req.user_id, "brief")
     used, exists = 0, False
     if uid:
-        ok, used, exists = _check_ai(uid, "chat", AI_FREE_CHAT)
+        lim = _ai_limits(uid)
+        ok, used, exists = _check_ai(uid, "chat", lim["chat"])
         if not ok:
-            return {"status": "limit_reached", "limit": AI_FREE_CHAT}
+            return {"status": "limit_reached", "limit": lim["chat"], "premium": lim["premium"]}
 
     profile = _profile_context(uid) if uid else ""
     prompt = f"""
@@ -882,3 +935,193 @@ def companion_brief(req: BriefRequest, request: Request, authorization: Optional
     except Exception as e:
         print(f"❌ Ошибка сводки компаньона: {e}")
         raise HTTPException(status_code=500, detail="Ошибка обработки запроса")
+
+
+# ===================== ПРЕМИУМ: GOOGLE PLAY BILLING =====================
+# Приложение покупает подписку через Google Play и присылает сюда purchaseToken. Доступ
+# выдаём только по ответу Google (billing.fetch_subscription) — клиенту не верим.
+# Таблица billing_purchases и поля profiles.premium_* — см. db/phase8_premium.sql.
+
+class BillingVerifyRequest(BaseModel):
+    purchase_token: str
+    product_id: Optional[str] = None
+    user_id: Optional[str] = None
+
+
+class BillingStatusRequest(BaseModel):
+    user_id: Optional[str] = None
+
+
+_TERMINAL_STATES = {"SUBSCRIPTION_STATE_EXPIRED", "SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED"}
+
+
+def _iso(dt):
+    return dt.isoformat() if dt else None
+
+
+def _purchase_owner(token: str):
+    res = supabase.table("billing_purchases").select("user_id").eq("purchase_token", token).limit(1).execute()
+    row = _first_row(res.data)
+    return row.get("user_id") if row else None
+
+
+def _store_purchase(uid: str, token: str, ent: dict):
+    supabase.table("billing_purchases").upsert({
+        "purchase_token": token,
+        "user_id": uid,
+        "product_id": billing.PREMIUM_PRODUCT_ID,
+        "base_plan_id": ent["plan"],
+        "state": ent["state"],
+        "expiry_time": _iso(ent["until"]),
+        "auto_renewing": ent["auto_renewing"],
+        "latest_order_id": ent["order_id"],
+        "test_purchase": ent["test"],
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }, on_conflict="purchase_token").execute()
+
+
+def _best_purchase(uid: str):
+    """Самая поздняя по сроку активная покупка пользователя: (expiry, row) или None."""
+    now = datetime.now(timezone.utc)
+    rows = supabase.table("billing_purchases").select("*").eq("user_id", uid).execute().data or []
+    best = None
+    for r in rows:
+        exp = _parse_dt(r.get("expiry_time")) if r.get("expiry_time") else None
+        if r.get("state") in billing.ENTITLED_STATES and exp and exp > now and (best is None or exp > best[0]):
+            best = (exp, r)
+    return best
+
+
+def _recompute_premium(uid: str) -> dict:
+    """Срок Премиума в профиле = самая поздняя активная покупка Google Play пользователя.
+    Выданный вручную доступ (premium_source не google_play) не урезаем."""
+    now = datetime.now(timezone.utc)
+    best = _best_purchase(uid)
+    prof = _first_row(supabase.table("profiles").select("premium_until, premium_source").eq("id", uid).limit(1).execute().data) or {}
+    manual_until = _parse_dt(prof.get("premium_until")) if prof.get("premium_until") else None
+    manual = prof.get("premium_source") not in (None, "google_play") and manual_until and manual_until > now
+    if manual and (best is None or best[0] <= manual_until):
+        pass  # ручная выдача длиннее — оставляем как есть
+    elif best:
+        supabase.table("profiles").update({
+            "premium_until": best[0].isoformat(), "premium_plan": best[1].get("base_plan_id"),
+            "premium_source": "google_play",
+        }).eq("id", uid).execute()
+    elif prof.get("premium_source") == "google_play":
+        supabase.table("profiles").update({"premium_until": None, "premium_plan": None}).eq("id", uid).execute()
+    _PREMIUM_CACHE.pop(uid, None)
+    return _premium_payload(uid, best[1] if best else None)
+
+
+def _premium_payload(uid: str, best_row=None) -> dict:
+    until = _premium_until(uid, fresh=True)
+    active = bool(until and until > datetime.now(timezone.utc))
+    plan, source = None, None
+    try:
+        prof = _first_row(supabase.table("profiles").select("premium_plan, premium_source").eq("id", uid).limit(1).execute().data) or {}
+        plan, source = prof.get("premium_plan"), prof.get("premium_source")
+    except Exception:
+        pass
+    lim = _ai_limits(uid)
+    return {
+        "premium": active,
+        "premium_until": _iso(until) if active else None,
+        "plan": plan if active else None,
+        "source": source if active else None,   # google_play | manual
+        "auto_renewing": bool(best_row and best_row.get("auto_renewing")) if active else False,
+        "billing": billing.enabled,
+        "limits": {"chat": lim["chat"], "parse": lim["parse"]},
+    }
+
+
+def _verify_token(uid: str, token: str) -> dict:
+    """Проверить токен у Google, сохранить, подтвердить. Возвращает {status, acknowledged}."""
+    owner = _purchase_owner(token)
+    if owner and owner != uid:
+        return {"status": "foreign", "acknowledged": False}
+    try:
+        sub = billing.fetch_subscription(token)
+    except billing.BillingError as e:
+        if e.status in (400, 404, 410):
+            return {"status": "invalid", "acknowledged": False}
+        raise
+    ent = billing.entitlement(sub)
+    # При покупке приложение передаёт obfuscatedAccountId = id пользователя: так токен,
+    # купленный на одном аккаунте Striva, нельзя «активировать» на другом.
+    if ent["account_id"] and ent["account_id"] != uid:
+        return {"status": "foreign", "acknowledged": False}
+    if ent["state"] == "SUBSCRIPTION_STATE_PENDING":
+        return {"status": "pending", "acknowledged": False}
+    _store_purchase(uid, token, ent)
+    acknowledged = not ent["pending_ack"]
+    if ent["active"] and ent["pending_ack"]:
+        try:
+            billing.acknowledge(token, billing.PREMIUM_PRODUCT_ID)
+            acknowledged = True
+        except billing.BillingError as e:
+            logging.warning(f"acknowledge failed (приложение подтвердит само): {e}")
+    return {"status": "active" if ent["active"] else "inactive", "acknowledged": acknowledged}
+
+
+@app.post("/billing/verify")
+def billing_verify(req: BillingVerifyRequest, request: Request, authorization: Optional[str] = Header(default=None)):
+    uid = _guard_rate(request, authorization, req.user_id, "billing")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    if not billing.enabled:
+        return JSONResponse(status_code=503, content={"status": "unavailable"})
+    token = (req.purchase_token or "").strip()
+    if not token or len(token) > 1000:
+        raise HTTPException(status_code=400, detail="Некорректный токен покупки")
+    if req.product_id and req.product_id != billing.PREMIUM_PRODUCT_ID:
+        raise HTTPException(status_code=400, detail="Неизвестный товар")
+    try:
+        result = _verify_token(uid, token)
+        payload = _recompute_premium(uid)
+    except billing.BillingError as e:
+        logging.error(f"billing verify: {e}")
+        raise HTTPException(status_code=502, detail="Google Play не ответил, попробуйте позже")
+    except Exception:
+        logging.exception("billing verify: ошибка БД (выполнен ли db/phase8_premium.sql?)")
+        raise HTTPException(status_code=500, detail="Не удалось сохранить покупку, попробуйте позже")
+    return {**result, **payload}
+
+
+def _free_payload() -> dict:
+    return {"premium": False, "premium_until": None, "plan": None, "source": None, "auto_renewing": False,
+            "billing": billing.enabled, "limits": {"chat": AI_FREE_CHAT, "parse": AI_FREE_PARSE}}
+
+
+@app.post("/billing/status")
+def billing_status(req: BillingStatusRequest, request: Request, authorization: Optional[str] = Header(default=None)):
+    """Текущий статус Премиума. Заодно перепроверяет у Google подписки, у которых истёк срок
+    (продление) или давно не было проверки (отмена, возврат денег)."""
+    uid = _guard_rate(request, authorization, req.user_id, "billing")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    try:
+        if not billing.enabled:
+            return _premium_payload(uid)
+        now = datetime.now(timezone.utc)
+        rows = supabase.table("billing_purchases").select("*").eq("user_id", uid).execute().data or []
+        for r in rows[:5]:
+            if r.get("state") in _TERMINAL_STATES:
+                continue
+            exp = _parse_dt(r.get("expiry_time")) if r.get("expiry_time") else None
+            checked = _parse_dt(r.get("checked_at")) if r.get("checked_at") else None
+            checked = checked or (now - billing.STALE_AFTER - timedelta(minutes=1))
+            expired = exp is None or exp <= now
+            # Истёк срок → вероятно, прошло продление: проверяем (но не чаще раза в 10 минут —
+            # Google может провести списание с задержкой). Иначе — раз в STALE_AFTER.
+            if (expired and now - checked > timedelta(minutes=10)) or now - checked > billing.STALE_AFTER:
+                try:
+                    _verify_token(uid, r["purchase_token"])
+                except billing.BillingError as e:
+                    logging.warning(f"billing recheck: {e}")
+        return _recompute_premium(uid)
+    except Exception:
+        logging.exception("billing status (выполнен ли db/phase8_premium.sql?)")
+        try:
+            return _premium_payload(uid)
+        except Exception:
+            return _free_payload()

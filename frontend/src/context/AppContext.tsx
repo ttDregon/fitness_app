@@ -18,6 +18,8 @@ import {
   cancelScheduledByPrefix, cancelScheduled, Notifications,
 } from '../lib/notifications';
 import { appAlert } from '../components/AppAlert';
+import { usePremiumController, type PaywallReason } from './premium';
+import { AI_PREMIUM_CHAT_PER_DAY, AI_PREMIUM_PARSE_PER_DAY } from '../config/billing';
 import type {
   Session, WorkoutData, SavedAccount, Group, GroupMember, WeightLog,
   WorkoutRecord, AssignedWorkout, TrainingSession, ChatMessage, ChatSession, Macros,
@@ -33,6 +35,8 @@ function useAppController() {
   const [session, setSession] = useState<Session | null>(null);
   // false, пока не проверили сохранённую сессию — чтобы при старте не мелькал экран входа.
   const [authReady, setAuthReady] = useState(false);
+  // Striva Премиум (подписка Google Play): статус, экран тарифов, покупка — см. ./premium.ts.
+  const premium = usePremiumController(session?.user?.id);
   // false, пока при холодном старте не загрузятся ключевые данные (показываем экран загрузки).
   const [bootReady, setBootReady] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -628,6 +632,7 @@ function useAppController() {
     ]);
     if (isStale(session.user.id)) return;
     setStartWeight(first?.[0]?.weight ?? null);
+    if (data) premium.applyProfilePremium(data);
     if (data) {
       smoothStateUpdate(() => {
         setCurrentWeight(data.weight || 0);
@@ -1019,7 +1024,7 @@ function useAppController() {
     setIsGeneratingPlan(true);
     try {
       const res = await generateWorkoutPlan(muscleGroup, preferences, session?.user?.id, await buildAiContext());
-      if (res?.status === 'limit_reached') { appAlert('Лимит', `Генерация планов: ${res.limit}/день. Лимит на сегодня исчерпан.`); return null; }
+      if (res?.status === 'limit_reached') { aiLimitAlert(res, 'Лимит ИИ-планов', 'Генерация планов', 'limit_plan'); return null; }
       if (!res?.plan || !Array.isArray(res.plan.exercises)) throw new Error('ИИ вернул данные в неверном формате');
       return res.plan as GeneratedWorkoutPlan;
     } catch (e: any) {
@@ -1112,7 +1117,10 @@ function useAppController() {
     }
   };
 
+  // Инструменты тренера (клуб, назначения, расписание) входят в Премиум. Просмотр клиентов и
+  // уже назначенного остаётся бесплатным — после окончания подписки тренер не теряет данные.
   const startScheduling = () => {
+    if (!premium.requirePremium('trainer')) return;
     smoothStateUpdate(() => {
       setScheduleStep('group'); setSchedDate(''); setSchedTime(''); setTempDate(new Date());
     });
@@ -1143,6 +1151,7 @@ function useAppController() {
   };
 
   const saveTrainingSession = async () => {
+    if (!premium.requirePremium('trainer')) return;
     if (!schedDate || !schedTime || !schedSelectedMember) return;
     const { error } = await supabase.from('training_sessions').insert([{ group_id: schedSelectedGroup?.id, client_id: schedSelectedMember.id, trainer_id: session?.user?.id, session_date: schedDate, session_time: schedTime }]);
     if (error) appAlert("Ошибка", error.message);
@@ -1206,10 +1215,11 @@ function useAppController() {
 
   const assignWorkoutToMember = async () => {
     if (!assignNote) return;
+    if (!premium.requirePremium('trainer')) return;
     setIsLoading(true);
     try {
       const aiData = await parseWorkout(assignNote, session?.user?.id);
-      if (aiData?.status === 'limit_reached') { appAlert('Лимит разбора', `Разбор тренировок: ${aiData.limit}/день. Лимит на сегодня исчерпан.`); return; }
+      if (aiData?.status === 'limit_reached') { aiLimitAlert(aiData, 'Лимит разбора', 'Разбор тренировок', 'limit_parse'); return; }
       if (!aiData || !Array.isArray(aiData.parsed_data)) throw new Error('ИИ вернул данные в неверном формате');
       const newExercises: WorkoutData[] = aiData.parsed_data.map((item: any, index: number) => ({ ...item, id: `task_${Date.now()}_${index}`, completed: false }));
       const targetDate = assignWorkoutDate;
@@ -1237,6 +1247,7 @@ function useAppController() {
   };
 
   const createGroup = async () => {
+    if (!premium.requirePremium('trainer')) return;
     if (!newGroupName.trim()) return;
     const randomCode = Math.floor(100000 + Math.random() * 900000).toString();
     const { data, error } = await supabase.from('groups').insert([{ name: newGroupName, code: randomCode, owner_id: session?.user?.id }]).select();
@@ -1317,7 +1328,11 @@ function useAppController() {
   };
 
   const handleDeleteAccount = () => {
-    appAlert("Удаление аккаунта", "Профиль, тренировки, питание и история веса будут удалены навсегда. Продолжить?", [
+    // Подписка Google Play живёт отдельно от аккаунта Striva: удаление её не отменяет.
+    const subNote = premium.isPremium && premium.autoRenewing
+      ? "\n\nПодписка Премиум оформлена через Google Play и при удалении аккаунта НЕ отменится — отмените её в Google Play → «Платежи и подписки»."
+      : "";
+    appAlert("Удаление аккаунта", `Профиль, тренировки, питание и история веса будут удалены навсегда.${subNote} Продолжить?`, [
       { text: "Отмена", style: "cancel" },
       { text: "Удалить", style: "destructive", onPress: async () => {
           setIsLoading(true);
@@ -1450,12 +1465,24 @@ function useAppController() {
     }
   };
 
+  // Лимит ИИ на сегодня исчерпан. Бесплатным — предлагаем Премиум (кнопка открывает тарифы),
+  // у кого Премиум уже есть — просто «обновится завтра». res.premium присылает бэкенд.
+  const aiLimitAlert = (res: any, title: string, what: string, reason: PaywallReason) => {
+    const limit = res?.limit;
+    if (res?.premium) { appAlert(title, `${what}: ${limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return; }
+    const premiumLimit = reason === 'limit_chat' ? AI_PREMIUM_CHAT_PER_DAY : AI_PREMIUM_PARSE_PER_DAY;
+    appAlert(title, `${what}: ${limit}/день на бесплатном тарифе — завтра лимит обновится. С Премиумом — до ${premiumLimit} в день.`, [
+      { text: 'Позже', style: 'cancel' },
+      { text: 'Премиум', onPress: () => premium.openPaywall(reason) },
+    ]);
+  };
+
   const sendToAI = async (noteText: string): Promise<boolean> => {
     if (!noteText.trim()) return false;
     setIsLoading(true);
     try {
       const data = await parseWorkout(noteText, session?.user?.id);
-      if (data?.status === 'limit_reached') { appAlert('Лимит разбора', `Разбор тренировок: ${data.limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return false; }
+      if (data?.status === 'limit_reached') { aiLimitAlert(data, 'Лимит разбора', 'Разбор тренировок', 'limit_parse'); return false; }
       const newParsedData: WorkoutData[] = (data?.parsed_data || []).filter((x: any) => x && x.exercise);
       // Раньше пустой разбор всё равно сохранялся «тренировкой» без подходов и показывал «Успех».
       if (newParsedData.length === 0) {
@@ -1518,7 +1545,7 @@ function useAppController() {
     setIsMealPreviewLoading(true);
     try {
       const data = await parseMeals(text, session?.user?.id);
-      if (data?.status === 'limit_reached') { appAlert('Лимит разбора', `Разбор еды: ${data.limit}/день. Лимит на сегодня исчерпан, завтра обновится.`); return; }
+      if (data?.status === 'limit_reached') { aiLimitAlert(data, 'Лимит разбора', 'Разбор еды', 'limit_parse'); return; }
       if (!data || data.error || !Array.isArray(data.meals)) throw new Error('Не удалось разобрать еду. Попробуйте описать иначе.');
       const meals: MealItem[] = data.meals.map((meal: any, mi: number) => {
         const items: FoodItem[] = (meal.items || []).map((it: any) => ({ name: it.name || 'блюдо', calories: Number(it.calories) || 0, protein: Number(it.protein) || 0, fat: Number(it.fat) || 0, carbs: Number(it.carbs) || 0 }));
@@ -1599,7 +1626,11 @@ function useAppController() {
       const appContext = await buildAiContext();
       const data = await sendChat(apiMessages, session?.user?.id, dailyCalorieNorm, dailyMacros, appContext, companionPersona);
       if (data?.limit_reached) {
-        appendToChat(chatId, { id: (Date.now() + 1).toString(), text: `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Лимит обновится завтра.`, sender: 'ai' });
+        const text = data.premium
+          ? `Дневной лимит ИИ-чата исчерпан (${data.limit}/день). Лимит обновится завтра.`
+          : `Бесплатный лимит ИИ-чата на сегодня исчерпан (${data.limit}/день). Завтра он обновится, а с Премиумом — до ${AI_PREMIUM_CHAT_PER_DAY} сообщений в день.`;
+        appendToChat(chatId, { id: (Date.now() + 1).toString(), text, sender: 'ai' });
+        if (!data.premium) premium.openPaywall('limit_chat');
         return;
       }
       const aiMsg: ChatMessage = { id: (Date.now() + 1).toString(), text: data.reply || "К сожалению я не могу вам с этим помочь", sender: 'ai', workoutPlan: data.workout_plan || undefined };
@@ -1732,7 +1763,7 @@ function useAppController() {
         setCompanionBrief(b);
         kvSetJSON(briefKey(), b);
       } else if (res?.status === 'limit_reached' && force) {
-        appAlert('Лимит', `Дневной лимит ИИ (${res.limit}) исчерпан. Обновится завтра.`);
+        aiLimitAlert(res, 'Лимит ИИ', 'ИИ-компаньон', 'limit_chat');
       }
     } catch (e: any) {
       if (force) appAlert('Компаньон недоступен', e?.message || 'Попробуйте позже.');
@@ -2024,6 +2055,9 @@ function useAppController() {
 
     // ИИ-компаньон
     companionPersona, setCompanionPersona, companionBrief, isBriefLoading, refreshCompanionBrief, askCompanion,
+
+    // Премиум (Google Play Billing)
+    ...premium,
   };
 }
 

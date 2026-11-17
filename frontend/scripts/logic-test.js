@@ -11,7 +11,7 @@ const front = path.resolve(__dirname, '..');
 const out = fs.mkdtempSync(path.join(os.tmpdir(), 'striva-logic-'));
 const ts = require(path.join(front, 'node_modules', 'typescript'));
 
-const files = ['src/utils/date.ts', 'src/utils/stats.ts', 'src/utils/companion.ts', 'src/data/exercises.ts', 'src/utils/authErrors.ts', 'src/utils/workout.ts'];
+const files = ['src/utils/date.ts', 'src/utils/stats.ts', 'src/utils/companion.ts', 'src/data/exercises.ts', 'src/utils/authErrors.ts', 'src/utils/workout.ts', 'src/utils/premium.ts'];
 for (const f of files) {
   const src = fs.readFileSync(path.join(front, f), 'utf8');
   const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
@@ -23,6 +23,7 @@ const date = require(path.join(out, 'src/utils/date.js'));
 const stats = require(path.join(out, 'src/utils/stats.js'));
 const comp = require(path.join(out, 'src/utils/companion.js'));
 const auth = require(path.join(out, 'src/utils/authErrors.js'));
+const prem = require(path.join(out, 'src/utils/premium.js'));
 
 let ok = true;
 const check = (name, cond, extra = '') => { console.log(`${cond ? 'PASS' : 'FAIL'} ${name} ${extra}`); ok = ok && cond; };
@@ -97,6 +98,37 @@ check('empty ctx says journal empty', emptyCtx.includes('Журнал пуст')
 check('auth error translate', auth.translateAuthError({ message: 'Invalid login credentials' }) === 'Неверный email или пароль.');
 check('auth unknown passthrough', auth.translateAuthError({ message: 'weird thing' }) === 'weird thing');
 check('email validation', auth.isValidEmail(' a@b.co ') && !auth.isValidEmail('a@b') && !auth.isValidEmail('ab.com'));
+
+// --- Премиум: тарифы из Google Play → карточки на экране оформления ---
+const phase = (period, micros, fmt, mode = 1, cycles = 0) => ({ billingPeriod: period, priceAmountMicros: String(micros), formattedPrice: fmt, priceCurrencyCode: 'UAH', recurrenceMode: mode, billingCycleCount: cycles });
+const offer = (plan, token, phases) => ({ basePlanIdAndroid: plan, offerTokenAndroid: token, pricingPhasesAndroid: { pricingPhaseList: phases } });
+const PLANS = [{ id: 'monthly', label: '1 месяц', months: 1 }, { id: 'quarterly', label: '3 месяца', months: 3 }, { id: 'yearly', label: '12 месяцев', months: 12 }];
+const fmt = (m, c) => `${Math.round(m / 1e6)} ${c}`;
+const storeOffers = [
+  offer('yearly', 'tok-y-trial', [phase('P7D', 0, 'Бесплатно', 3, 1), phase('P1Y', 1990e6, '1 990 ₴')]),
+  offer('monthly', 'tok-m', [phase('P1M', 299e6, '299 ₴')]),
+  offer('yearly', 'tok-y', [phase('P1Y', 1990e6, '1 990 ₴')]),
+  offer('quarterly', 'tok-q', [phase('P3M', 749e6, '749 ₴')]),
+  offer('weekly', 'tok-w', [phase('P1W', 99e6, '99 ₴')]),   // не наш план — игнорируется
+  { basePlanIdAndroid: 'monthly', offerTokenAndroid: null }, // битое предложение — игнорируется
+];
+const cards = prem.buildPlanOffers(storeOffers, PLANS, fmt);
+check('plans in config order', cards.map(c => c.planId).join() === 'monthly,quarterly,yearly', cards.map(c => c.planId).join());
+const yr = cards.find(c => c.planId === 'yearly');
+check('trial offer preferred', yr.offerToken === 'tok-y-trial' && yr.trialDays === 7, JSON.stringify(yr));
+check('regular price, not trial', yr.price === '1 990 ₴' && yr.priceMicros === 1990e6);
+check('per month for year', yr.perMonth === '166 UAH', String(yr.perMonth));
+check('savings yearly 45%', yr.savingsPct === 45, String(yr.savingsPct));
+const q = cards.find(c => c.planId === 'quarterly');
+check('savings quarterly 16%', q.savingsPct === 16 && q.perMonth === '250 UAH', JSON.stringify(q));
+check('monthly has no per-month/savings', cards[0].perMonth === null && cards[0].savingsPct === 0);
+check('missing base plan skipped', prem.buildPlanOffers([offer('monthly', 't', [phase('P1M', 299e6, '299 ₴')])], PLANS, fmt).length === 1);
+check('no offers → empty', prem.buildPlanOffers(null, PLANS).length === 0 && prem.buildPlanOffers([], PLANS).length === 0);
+check('tiny saving hidden', prem.buildPlanOffers([offer('monthly', 'a', [phase('P1M', 100e6, '100')]), offer('quarterly', 'b', [phase('P3M', 295e6, '295')])], PLANS, fmt)[1].savingsPct === 0);
+check('period days', prem.periodDays('P7D') === 7 && prem.periodDays('P1W') === 7 && prem.periodDays('P1M') === 30 && prem.periodDays('P1Y') === 365 && prem.periodDays('x') === 0);
+check('premium active', prem.isPremiumActive(new Date(Date.now() + 60000).toISOString()) && !prem.isPremiumActive(new Date(Date.now() - 1000).toISOString()) && !prem.isPremiumActive(null) && !prem.isPremiumActive('garbage'));
+check('premium date ru', prem.formatPremiumDate('2026-12-15T10:00:00Z') === '15 декабря 2026' && prem.formatPremiumDate(null) === '');
+check('default money format', /1\s?990/.test(prem.defaultMoneyFormat(1990e6, 'UAH')), prem.defaultMoneyFormat(1990e6, 'UAH'));
 
 if (process.argv.includes('--print')) console.log('\n--- пример снимка для компаньона ---\n' + ctx);
 fs.rmSync(out, { recursive: true, force: true });

@@ -49,7 +49,7 @@ export default function ClientPlanModal() {
     clientProfile, activeGroup, session,
     assignNote, setAssignNote, assignWorkoutDate, setAssignWorkoutDate, assignDateObj, setAssignDateObj,
     assignDatePickerVisible, setAssignDatePickerVisible, onAssignDateChange, assignWorkoutToMember, isLoading, memberDayPlan,
-    removeAssignedExercises,
+    removeAssignedExercises, requirePremium, openPaywall,
   } = useApp();
 
   // Сдвиг даты тренировки стрелками (меняет дату → контекст подгружает план на неё).
@@ -107,10 +107,15 @@ export default function ClientPlanModal() {
 
   const calcPreview = async () => {
     if (!mealInput.trim()) return;
+    if (!requirePremium('trainer')) return;
     setMealPreviewLoading(true);
     try {
       const data = await parseMeals(mealInput, session?.user?.id);
-      if (data?.status === 'limit_reached') { appAlert('Лимит разбора', `Разбор еды: ${data.limit}/день. Лимит на сегодня исчерпан.`); return; }
+      if (data?.status === 'limit_reached') {
+        if (data.premium) appAlert('Лимит разбора', `Разбор еды: ${data.limit}/день. Лимит на сегодня исчерпан.`);
+        else openPaywall('limit_parse');
+        return;
+      }
       if (!data || data.error || !Array.isArray(data.meals)) throw new Error(data?.error || 'ИИ вернул данные в неверном формате');
       const items: FoodItem[] = data.meals.flatMap((meal: any) => (meal.items || []).map((it: any) => ({ name: it.name || 'блюдо', calories: it.calories || 0, protein: it.protein || 0, fat: it.fat || 0, carbs: it.carbs || 0 })));
       if (items.length === 0) throw new Error('Не удалось распознать продукты');

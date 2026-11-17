@@ -5,6 +5,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { LineChart } from 'react-native-chart-kit';
 import { ScrollPicker } from '../components/ScrollPicker';
 import { GradientButton, GradientView } from '../components/Gradient';
+import { PremiumBanner } from '../components/PremiumBanner';
 import { weightWholeData, decimalsData } from '../utils/pickers';
 import { goalProgressPct } from '../utils/goal';
 import { plural } from '../utils/date';
@@ -267,6 +268,8 @@ export default function HomeScreen() {
           )}
         </View>
       </View>
+
+      <PremiumBanner />
 
       <TouchableOpacity style={[styles.mainActionBtn, {backgroundColor: COLORS.card, borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.4)', marginBottom: 15, shadowColor: 'transparent', elevation: 0}]} onPress={() => openAnimatedModal(setIsScheduleListVisible)}>
         <Ionicons name="calendar-outline" size={24} color={COLORS.tabBar} style={{marginRight: 10}} />

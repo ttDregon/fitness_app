@@ -19,7 +19,7 @@ export default function ClubScreen() {
     userRole, groupMembers, fetchGroupDetails, openAnimatedModal, setSelectedMember,
     setIsMyWorkoutVisible, isMyWorkoutVisible, setAssignWorkoutDate, setAssignDateObj,
     myPlanViewDate, setMyPlanViewDate, myDayPlan, setMyDayPlan, shiftMyPlanDate,
-    toggleExerciseStatus, deleteOrLeaveGroup, groups, setIsCreatingGroup, handleTabChange, setIsJoiningGroup,
+    toggleExerciseStatus, deleteOrLeaveGroup, groups, setIsCreatingGroup, handleTabChange, setIsJoiningGroup, requirePremium,
     isCreatingGroup, newGroupName, setNewGroupName, createGroup, isJoiningGroup, joinCode, setJoinCode, joinGroup,
     modalOpacityAnim, modalScaleAnim, closeAnimatedModal,
   } = useApp();
@@ -159,7 +159,7 @@ export default function ClubScreen() {
       <View style={styles.header}>
         <View style={{ flex: 1, marginRight: 15 }}><Text style={styles.pageTitle} numberOfLines={1}>Клубы</Text></View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          {userRole === 'trainer' && (<TouchableOpacity onPress={() => openAnimatedModal(setIsCreatingGroup)} style={{ marginRight: 14 }}><Ionicons name="add-circle" size={38} color={COLORS.rose} /></TouchableOpacity>)}
+          {userRole === 'trainer' && (<TouchableOpacity onPress={() => requirePremium('trainer') && openAnimatedModal(setIsCreatingGroup)} style={{ marginRight: 14 }}><Ionicons name="add-circle" size={38} color={COLORS.rose} /></TouchableOpacity>)}
           <TouchableOpacity onPress={() => openAnimatedModal(setIsJoiningGroup)} style={{ marginRight: 14 }}><Ionicons name="enter-outline" size={34} color={COLORS.rose} /></TouchableOpacity>
           <TouchableOpacity onPress={() => handleTabChange('profile')} style={styles.profileBtn}><Ionicons name="person-circle-outline" size={42} color={COLORS.textPrimary} /></TouchableOpacity>
         </View>
@@ -169,7 +169,7 @@ export default function ClubScreen() {
           <Ionicons name="people-circle" size={120} color={COLORS.rose} style={{opacity: 0.85, marginBottom: 10}} />
           <Text style={styles.emptyText}>Вы еще не состоите в клубах</Text>
           <View style={styles.actionButtonsRow}>
-            {userRole === 'trainer' && (<GradientButton colors={GRADIENTS.rose} style={styles.centerActionBtn} onPress={() => openAnimatedModal(setIsCreatingGroup)}><Text style={styles.buttonText}>Создать клуб</Text></GradientButton>)}
+            {userRole === 'trainer' && (<GradientButton colors={GRADIENTS.rose} style={styles.centerActionBtn} onPress={() => requirePremium('trainer') && openAnimatedModal(setIsCreatingGroup)}><Text style={styles.buttonText}>Создать клуб</Text></GradientButton>)}
             <TouchableOpacity style={[styles.centerActionBtn, {backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', marginTop: 15, elevation: 0}]} onPress={() => openAnimatedModal(setIsJoiningGroup)}><Text style={[styles.buttonText, {color: COLORS.textPrimary}]}>Вступить по коду</Text></TouchableOpacity>
           </View>
         </View>

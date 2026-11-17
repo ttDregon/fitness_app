@@ -104,6 +104,42 @@ export async function fetchCompanionBrief(appContext: string, persona: Companion
   return response.json();
 }
 
+// --- Премиум (Google Play Billing). Статус выдаёт только бэкенд по ответу Google. ---
+export interface PremiumStatus {
+  premium: boolean;
+  premium_until: string | null;
+  plan: string | null;
+  auto_renewing: boolean;
+  source?: string | null;
+  billing: boolean;                       // настроена ли проверка покупок на сервере
+  limits?: { chat: number; parse: number };
+}
+export interface VerifyResult extends PremiumStatus {
+  // active — Премиум открыт; pending — платёж ещё не прошёл; foreign — подписка привязана к
+  // другому аккаунту Striva; invalid — Google не знает такую покупку; inactive — истекла.
+  status: 'active' | 'pending' | 'foreign' | 'invalid' | 'inactive' | 'unavailable';
+  acknowledged?: boolean;
+}
+
+async function detail(response: Response, fallback: string): Promise<string> {
+  try { const j = await response.json(); return (typeof j?.detail === 'string' && j.detail) || fallback; } catch { return fallback; }
+}
+
+// Текущий статус Премиума; заодно бэкенд перепроверяет у Google продление/отмену.
+export async function fetchPremiumStatus(userId?: string): Promise<PremiumStatus> {
+  const response = await post('/billing/status', { user_id: userId }, 30000);
+  if (!response.ok) throw new Error(await detail(response, 'Не удалось проверить подписку'));
+  return response.json();
+}
+
+// Отдать бэкенду токен покупки Google Play на проверку.
+export async function verifyPremiumPurchase(purchaseToken: string, productId: string, userId?: string): Promise<VerifyResult> {
+  const response = await post('/billing/verify', { purchase_token: purchaseToken, product_id: productId, user_id: userId });
+  if (response.status === 503) return { status: 'unavailable', premium: false, premium_until: null, plan: null, auto_renewing: false, billing: false };
+  if (!response.ok) throw new Error(await detail(response, 'Не удалось проверить покупку'));
+  return response.json();
+}
+
 // Генерация ИИ-плана тренировки под группу мышц -> { status, plan: { plan_name, exercises } }
 export async function generateWorkoutPlan(muscleGroup: string, preferences: string, userId?: string, appContext?: string): Promise<any> {
   const response = await post('/generate_workout_plan', { muscle_group: muscleGroup, preferences, user_id: userId, app_context: appContext });

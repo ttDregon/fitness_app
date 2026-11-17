@@ -25,7 +25,7 @@
 
 ## 4. Бэкенд: задеплоить /notify
 - Закоммить и запушь — Render передеплоит. `httpx` уже в `requirements.txt`.
-- Проверь, что живой: открой `https://fitness-app-backend-4q04.onrender.com/` → `{"status":"ok"}`.
+- Проверь, что живой: открой `https://fitness-app-backend-5p49.onrender.com/` → `{"status":"ok"}`.
 
 ## 5. Собрать и поставить новый APK
 ```

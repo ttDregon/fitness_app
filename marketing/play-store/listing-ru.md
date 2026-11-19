@@ -54,6 +54,6 @@ andrey1985turko@gmail.com
 
 ## Privacy Policy URL
 
-https://claude.ai/code/artifact/af27e39b-05d2-4b94-b0ea-87bc46f4aae8
+https://ttdregon.github.io/fitness_app/privacy/
 
 (Тот же файл можно переопубликовать с той же ссылкой в будущем — см. `../../frontend/src/screens/SettingsScreen.tsx`, там она же используется в самом приложении.)

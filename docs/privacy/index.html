@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Политика конфиденциальности — Striva</title>
+<meta name="description" content="Какие данные собирает приложение Striva, зачем, кому передаёт и как их удалить.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+  :root{
+    --bg:#F6F7FB; --surface:#FFFFFF; --card:#FFFFFF; --border:rgba(23,20,58,0.10);
+    --text:#15172B; --text-soft:#4B4F6B; --text-mute:#8A8EAA;
+    --accent:#6D3FE0; --accent-soft:#F0EAFB; --accent-ink:#4A22B8;
+    --link:#6D3FE0;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0A0C16; --surface:#0D0F1C; --card:#131627; --border:rgba(255,255,255,0.08);
+      --text:#F5F7FF; --text-soft:#B7BEDC; --text-mute:#7B82A6;
+      --accent:#A78BFA; --accent-soft:rgba(139,92,246,0.14); --accent-ink:#C9B6FF;
+      --link:#B79CFF;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0A0C16; --surface:#0D0F1C; --card:#131627; --border:rgba(255,255,255,0.08);
+    --text:#F5F7FF; --text-soft:#B7BEDC; --text-mute:#7B82A6;
+    --accent:#A78BFA; --accent-soft:rgba(139,92,246,0.14); --accent-ink:#C9B6FF;
+    --link:#B79CFF;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:'Inter',-apple-system,'Segoe UI',Roboto,sans-serif;
+    line-height:1.65; -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.eyebrow,.wordmark{ font-family:'Manrope','Inter',-apple-system,sans-serif; }
+  .mono{ font-family:'JetBrains Mono',ui-monospace,Consolas,monospace; }
+
+  a{ color:var(--link); text-decoration-color:rgba(167,139,250,0.4); text-underline-offset:3px; }
+  a:hover{ text-decoration-color:currentColor; }
+  a:focus-visible, button:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; border-radius:4px; }
+
+  /* ---------- header ---------- */
+  .hero{
+    padding:64px 24px 56px; display:flex; justify-content:center;
+    background:
+      radial-gradient(60% 140% at 12% -10%, var(--accent-soft), transparent 60%),
+      var(--surface);
+    border-bottom:1px solid var(--border);
+  }
+  .hero-inner{ width:100%; max-width:920px; }
+  .brand{ display:flex; align-items:center; gap:14px; margin-bottom:36px; }
+  .mark{ width:40px; height:40px; flex:none; }
+  .wordmark{ font-weight:800; font-size:20px; letter-spacing:-0.02em; }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-size:12px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--accent-ink); background:var(--accent-soft);
+    padding:6px 12px; border-radius:100px; margin-bottom:20px;
+  }
+  h1{
+    font-size:clamp(32px,5vw,46px); font-weight:800; letter-spacing:-0.02em;
+    text-wrap:balance; margin:0 0 14px;
+  }
+  .dek{ font-size:17px; color:var(--text-soft); max-width:60ch; margin:0 0 22px; }
+  .meta{ display:flex; flex-wrap:wrap; gap:10px 22px; font-size:13px; color:var(--text-mute); }
+  .meta span{ display:flex; align-items:center; gap:7px; }
+  .meta b{ color:var(--text-soft); font-weight:600; }
+
+  /* ---------- layout ---------- */
+  .layout{
+    max-width:920px; margin:0 auto; padding:48px 24px 96px;
+    display:grid; grid-template-columns:200px minmax(0,1fr); gap:48px;
+    align-items:start;
+  }
+  @media (max-width:780px){ .layout{ grid-template-columns:1fr; } }
+
+  nav.toc{ position:sticky; top:28px; }
+  nav.toc .toc-label{
+    font-size:11px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--text-mute); margin-bottom:14px;
+  }
+  nav.toc ol{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; counter-reset:toc; }
+  nav.toc li{ counter-increment:toc; }
+  nav.toc a{
+    display:flex; gap:10px; padding:7px 0; font-size:13.5px; color:var(--text-soft);
+    text-decoration:none; border-left:2px solid transparent; padding-left:12px; margin-left:-13px;
+  }
+  nav.toc a:hover{ color:var(--text); border-left-color:var(--border); }
+  nav.toc a::before{
+    content:counter(toc,decimal-leading-zero); font-family:'JetBrains Mono',monospace;
+    font-size:11px; color:var(--text-mute); padding-top:1px;
+  }
+  @media (max-width:780px){ nav.toc{ position:static; } nav.toc ol{ flex-direction:row; flex-wrap:wrap; column-gap:16px; } }
+
+  article{ min-width:0; max-width:66ch; }
+  section{ padding-top:40px; border-top:1px solid var(--border); }
+  section:first-of-type{ padding-top:0; border-top:none; }
+  section h2{
+    display:flex; align-items:baseline; gap:12px;
+    font-size:21px; font-weight:800; letter-spacing:-0.01em; margin:0 0 16px; scroll-margin-top:24px;
+  }
+  section h2 .num{ font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:500; color:var(--accent-ink); }
+  section p{ margin:0 0 14px; color:var(--text-soft); font-size:15.5px; }
+  section p:last-child{ margin-bottom:0; }
+  section h3{ font-size:14.5px; font-weight:700; color:var(--text); margin:22px 0 8px; }
+  section ul{ margin:0 0 14px; padding-left:0; list-style:none; display:flex; flex-direction:column; gap:9px; }
+  section ul li{ position:relative; padding-left:20px; color:var(--text-soft); font-size:15.5px; }
+  section ul li::before{ content:'—'; position:absolute; left:0; color:var(--text-mute); }
+  section ul li b{ color:var(--text); font-weight:600; }
+  strong{ color:var(--text); font-weight:600; }
+
+  section ol.steps{ margin:0 0 14px; padding-left:0; list-style:none; display:flex; flex-direction:column; gap:10px; counter-reset:steps; }
+  section ol.steps li{ position:relative; padding-left:34px; color:var(--text-soft); font-size:15.5px; counter-increment:steps; }
+  section ol.steps li::before{
+    content:counter(steps); position:absolute; left:0; top:-1px;
+    width:22px; height:22px; border-radius:7px; background:var(--accent-soft); color:var(--accent-ink);
+    font-family:'JetBrains Mono',monospace; font-weight:700; font-size:12.5px;
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  /* data table */
+  .table-wrap{ overflow-x:auto; margin:6px 0 18px; }
+  .data-table{ width:100%; border-collapse:collapse; font-size:14px; }
+  .data-table th{
+    text-align:left; font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--text-mute); padding:0 14px 10px 0; border-bottom:1px solid var(--border);
+  }
+  .data-table td{ padding:12px 14px 12px 0; border-bottom:1px solid var(--border); color:var(--text-soft); vertical-align:top; }
+  .data-table tr:last-child td{ border-bottom:none; }
+  .data-table td:first-child{ color:var(--text); font-weight:600; }
+
+  .pill-row{ display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 18px; }
+  .pill{
+    display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:600;
+    padding:7px 13px; border-radius:100px; background:var(--card); border:1px solid var(--border); color:var(--text-soft);
+  }
+  .pill .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent); flex:none; }
+
+  .callout{
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:18px 20px; margin:18px 0; font-size:14.5px; color:var(--text-soft);
+  }
+  .callout b{ color:var(--text); }
+  .callout.highlight{ border-color:var(--accent); background:var(--accent-soft); color:var(--text); }
+
+  footer{
+    max-width:920px; margin:0 auto; padding:0 24px 64px; color:var(--text-mute); font-size:13px;
+  }
+  footer .rule{ border-top:1px solid var(--border); padding-top:24px; display:flex; flex-wrap:wrap; gap:8px 18px; justify-content:space-between; }
+  @media (max-width:520px){ .hero{ padding:44px 16px 40px; } .layout{ padding:36px 16px 72px; } footer{ padding:0 16px 48px; } }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="hero-inner">
+    <div class="brand">
+      <span class="wordmark">Striva</span>
+    </div>
+
+    <div class="eyebrow">Юридический документ</div>
+    <h1>Политика конфиденциальности</h1>
+    <p class="dek">Что Striva знает о тебе, зачем это нужно приложению и как это удалить, если расхочешь.</p>
+    <div class="meta">
+      <span><b>Действует с</b>&nbsp;4&nbsp;сентября&nbsp;2026</span>
+      <span><b>Обновлена</b>&nbsp;19&nbsp;ноября&nbsp;2026</span>
+      <span><b>Приложение</b>&nbsp;Striva (com.ttdregon.mysafeapp)</span>
+      <span><b>Разработчик</b>&nbsp;ttdregon</span>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-label="Оглавление">
+    <div class="toc-label">Разделы</div>
+    <ol>
+      <li><a href="#scope">Область действия</a></li>
+      <li><a href="#collect">Какие данные собираем</a></li>
+      <li><a href="#use">Зачем используем</a></li>
+      <li><a href="#ai">Обработка ИИ</a></li>
+      <li><a href="#share">Кому передаём</a></li>
+      <li><a href="#storage">Где и как долго хранится</a></li>
+      <li><a href="#rights">Твои права</a></li>
+      <li><a href="#delete-account">Удаление аккаунта</a></li>
+      <li><a href="#security">Безопасность</a></li>
+      <li><a href="#kids">Возрастные ограничения</a></li>
+      <li><a href="#changes">Изменения политики</a></li>
+      <li><a href="#contact">Контакты</a></li>
+    </ol>
+  </nav>
+
+  <article>
+
+    <section id="scope">
+      <h2><span class="num">01</span>Область действия</h2>
+      <p>Эта политика описывает, какие данные собирает мобильное приложение <strong>Striva</strong> — трекер тренировок, питания и веса с ИИ-ассистентом — и связанный с ним backend. Используя приложение, ты соглашаешься с условиями ниже. Если не согласен(на) — пожалуйста, не пользуйся приложением и напиши нам, если хочешь удалить уже созданный аккаунт.</p>
+      <p>Striva создана одним разработчиком, а не компанией с отделом обработки данных — поэтому политика написана простым языком, без лишней юридической воды, но описывает всё честно и полно.</p>
+    </section>
+
+    <section id="collect">
+      <h2><span class="num">02</span>Какие данные мы собираем</h2>
+      <p>Всё в таблице ниже ты вводишь сам(а) — Striva не запрашивает доступ к контактам, геолокации, камере, микрофону или файлам на устройстве.</p>
+      <div class="table-wrap">
+      <table class="data-table">
+        <tr><th>Категория</th><th>Что именно</th></tr>
+        <tr><td>Аккаунт</td><td>email и пароль (хранится в захэшированном виде, мы его не видим)</td></tr>
+        <tr><td>Профиль</td><td>имя, пол, возраст, рост, текущий и целевой вес, цель (похудение / поддержание / набор массы), частота тренировок</td></tr>
+        <tr><td>Журнал тренировок</td><td>название упражнения, вес снаряда, число повторов, дата</td></tr>
+        <tr><td>Питание и вода</td><td>приёмы пищи, продукты, калории и БЖУ — введённые вручную или распознанные ИИ из текста; выпитая вода за день</td></tr>
+        <tr><td>Вес тела</td><td>история замеров веса с датами (график динамики)</td></tr>
+        <tr><td>Переписка с ИИ</td><td>твои сообщения в чате и ответы ассистента — хранятся в твоём аккаунте, чтобы история была на всех твоих устройствах; см. раздел 4</td></tr>
+        <tr><td>Подписка Striva Премиум</td><td>если оформишь: тариф, срок действия и статус подписки, номер заказа Google Play и токен покупки. Номер карты, адрес и другие платёжные данные мы не получаем — оплату целиком проводит Google Play</td></tr>
+        <tr><td>Клуб / тренер</td><td>если состоишь в клубе: название группы, код приглашения, список участников, назначенные тренировки и расписание сессий</td></tr>
+        <tr><td>Push-уведомления</td><td>технический токен устройства (Expo push token) — только чтобы доставить напоминание, без содержимого</td></tr>
+      </table>
+      </div>
+    </section>
+
+    <section id="use">
+      <h2><span class="num">03</span>Зачем используем</h2>
+      <div class="pill-row">
+        <span class="pill"><span class="dot"></span>Расчёт нормы калорий и БЖУ</span>
+        <span class="pill"><span class="dot"></span>История и графики прогресса</span>
+        <span class="pill"><span class="dot"></span>Персональные советы ИИ-ассистента</span>
+        <span class="pill"><span class="dot"></span>Напоминания о тренировках</span>
+        <span class="pill"><span class="dot"></span>Связь тренер ↔ клиент в клубе</span>
+        <span class="pill"><span class="dot"></span>Выдача Премиума после оплаты</span>
+        <span class="pill"><span class="dot"></span>Защита от злоупотребления ИИ-лимитом</span>
+      </div>
+      <p>Мы не используем данные для рекламы, не строим на них рекламные профили и не продаём их третьим лицам — Striva зарабатывает не на данных.</p>
+    </section>
+
+    <section id="ai">
+      <h2><span class="num">04</span>Обработка ИИ</h2>
+      <p>Когда ты пишешь в чат, просишь разобрать текст тренировки/еды, сгенерировать план или открываешь совет дня — текст запроса уходит на наш сервер, который пересылает его модели <strong>DeepSeek</strong> для ответа и возвращает результат обратно. Чтобы ассистент отвечал по твоим реальным данным, вместе с сообщением уходит снимок из приложения: имя, цель, вес тела и его динамика, питание и вода за сегодня, последние тренировки и рекорды, план от тренера на сегодня, ближайшие записи в расписании и незаконченная тренировка в конструкторе. DeepSeek обрабатывает запрос, но не хранит переписку от нашего имени долгосрочно; наш сервер текст запроса после ответа не сохраняет.</p>
+      <p>Историю переписки (твои сообщения и ответы ассистента) сохраняет само приложение — в облачной базе твоего аккаунта и копией на телефоне, чтобы диалоги были на новом устройстве и после переустановки. Её видишь только ты: тренер клуба переписку не видит. Удалённый в приложении диалог стирается с сервера (остаётся только служебная отметка без текста, чтобы диалог не вернулся с другого твоего телефона).</p>
+      <p>То, что ассистент записывает по твоей просьбе («съел…», «выпил…», «вешу…»), сохраняется как обычные записи дневника питания, воды и веса.</p>
+    </section>
+
+    <section id="share">
+      <h2><span class="num">05</span>Кому передаём данные</h2>
+      <p>Мы не продаём данные и не передаём их рекламным сетям. Часть данных обрабатывают сервисы, на которых работает Striva:</p>
+      <ul>
+        <li><b>Supabase</b> — база данных и аутентификация: хранит аккаунт, профиль, журналы, вес, историю чата с ИИ и статус подписки.</li>
+        <li><b>DeepSeek</b> — обработка текста и снимка данных для ответов ассистента (раздел 4).</li>
+        <li><b>Render</b> — хостинг серверной части приложения.</li>
+        <li><b>Google Play</b> — оплата подписки Striva Премиум; наш сервер проверяет в Google Play только статус и срок подписки.</li>
+        <li><b>Expo / Google (FCM)</b> — доставка push-уведомлений по токену устройства.</li>
+      </ul>
+      <p>Данные также видит тренер, если ты состоишь в его клубе — только то, что относится к тренировкам, питанию и расписанию в рамках клуба, не переписку с ИИ, не платёжные и не учётные данные.</p>
+    </section>
+
+    <section id="storage">
+      <h2><span class="num">06</span>Где и как долго хранится</h2>
+      <p>Основные данные, включая историю чата с ИИ, — в облачной базе Supabase, доступ к ним есть только у твоего аккаунта (и у тренера клуба — в рамках раздела 5). На телефоне хранится копия для быстрой и офлайн-работы: история чата, незаконченная тренировка в конструкторе, дневной кэш КБЖУ.</p>
+      <p>Мы храним данные, пока существует твой аккаунт. При удалении аккаунта (раздел 8) записи удаляются из базы; локальные копии стираются при удалении приложения с телефона.</p>
+    </section>
+
+    <section id="rights">
+      <h2><span class="num">07</span>Твои права</h2>
+      <ul>
+        <li><b>Посмотреть и исправить</b> — профиль, вес, журнал редактируются прямо в приложении; любой диалог с ИИ можно удалить.</li>
+        <li><b>Удалить аккаунт</b> — см. раздел 8 ниже, пошаговая инструкция.</li>
+        <li><b>Отключить уведомления</b> — в системных настройках телефона для Striva.</li>
+        <li><b>Отменить подписку</b> — в Google Play → Платежи и подписки.</li>
+        <li><b>Запросить выгрузку или удаление вручную</b> — напиши на почту в разделе 12, ответим в течение 30 дней.</li>
+      </ul>
+    </section>
+
+    <section id="delete-account">
+      <h2><span class="num">08</span>Удаление аккаунта и данных</h2>
+      <p>Аккаунт в <strong>Striva</strong> (com.ttdregon.mysafeapp, разработчик ttdregon) можно удалить двумя способами — прямо в приложении или письмом на почту, если приложение уже удалено с телефона.</p>
+
+      <h3>Способ 1 — прямо в приложении (быстрее всего)</h3>
+      <ol class="steps">
+        <li>Открой Striva и войди в свой аккаунт.</li>
+        <li>Перейди в <b>Профиль → Настройки</b>.</li>
+        <li>Прокрути вниз до раздела с кнопкой <b>«Удалить аккаунт»</b> (выделена красным).</li>
+        <li>Нажми «Удалить аккаунт» и подтверди действие во всплывающем окне.</li>
+        <li>Аккаунт и связанные данные удаляются немедленно — без дополнительных писем и подтверждений.</li>
+      </ol>
+
+      <h3>Способ 2 — по email (если нет доступа к приложению)</h3>
+      <ol class="steps">
+        <li>Напиши на <a href="mailto:striva2906@gmail.com">striva2906@gmail.com</a> с адреса, привязанного к аккаунту (или укажи его в письме).</li>
+        <li>Укажи тему письма: <b>«Удаление аккаунта Striva»</b>.</li>
+        <li>Мы подтверждаем личность по email аккаунта и удаляем данные в течение <b>30 дней</b>, о чём пришлём ответное письмо.</li>
+      </ol>
+
+      <div class="callout highlight"><b>Частичное удаление.</b> Можно запросить удаление только части данных (например, только истории веса), не закрывая аккаунт — опиши это в письме вместо полного удаления.</div>
+
+      <div class="callout"><b>Подписка.</b> Удаление аккаунта не отменяет подписку в Google Play — отмени её в Google Play → Платежи и подписки, иначе списания продолжатся.</div>
+
+      <h3>Что удаляется и что может остаться</h3>
+      <div class="table-wrap">
+      <table class="data-table">
+        <tr><th>Данные</th><th>Что происходит при удалении аккаунта</th></tr>
+        <tr><td>Email и пароль</td><td>удаляются безвозвратно сразу</td></tr>
+        <tr><td>Профиль (рост, вес, цель и т.д.)</td><td>удаляется безвозвратно сразу</td></tr>
+        <tr><td>Журнал тренировок, питания и воды</td><td>удаляется безвозвратно сразу</td></tr>
+        <tr><td>История веса тела</td><td>удаляется безвозвратно сразу</td></tr>
+        <tr><td>История чата с ИИ</td><td>удаляется с сервера безвозвратно сразу; копия на телефоне исчезает при удалении приложения</td></tr>
+        <tr><td>Данные подписки (статус, номер заказа)</td><td>удаляются у нас сразу; записи о платеже хранит Google по своим правилам</td></tr>
+        <tr><td>Членство в клубе / привязка к тренеру</td><td>удаляется сразу; у тренера остаётся только запись о том, что участник когда-то состоял в группе, без твоих персональных данных о теле/питании</td></tr>
+        <tr><td>Push-токен устройства</td><td>удаляется безвозвратно сразу</td></tr>
+        <tr><td>Резервные копии базы данных</td><td>ротируются автоматически и полностью перезаписываются в течение <b>до 30 дней</b> после удаления аккаунта</td></tr>
+      </table>
+      </div>
+      <p>После истечения указанных сроков ни один из перечисленных типов данных не сохраняется у нас и не может быть восстановлен.</p>
+    </section>
+
+    <section id="security">
+      <h2><span class="num">09</span>Безопасность</h2>
+      <p>Пароль хранится в захэшированном виде (мы физически не можем его прочитать). Данные передаются по HTTPS. В базе Supabase включены политики Row Level Security — аккаунт видит только свои записи (и записи своего клуба, если применимо). Полной гарантии абсолютной защиты не даёт никто — если заметишь уязвимость, напиши нам, будем благодарны.</p>
+    </section>
+
+    <section id="kids">
+      <h2><span class="num">10</span>Возрастные ограничения</h2>
+      <p>Striva не предназначена для детей младше 16 лет, и мы сознательно не собираем данные таких пользователей. Если ты родитель/опекун и считаешь, что ребёнок младше 16 создал аккаунт — напиши нам, мы его удалим.</p>
+    </section>
+
+    <section id="changes">
+      <h2><span class="num">11</span>Изменения политики</h2>
+      <p>Если мы существенно изменим, что собираем или зачем, — обновим эту страницу и дату вверху. Пользоваться приложением после изменений значит соглашаться с новой версией.</p>
+      <p>19 ноября 2026: добавлены подписка Striva Премиум (Google Play) и хранение истории чата с ИИ в аккаунте; уточнён состав данных, которые уходят ассистенту.</p>
+    </section>
+
+    <section id="contact">
+      <h2><span class="num">12</span>Контакты</h2>
+      <p>Вопросы, запросы на удаление или исправление данных — пиши на <a href="mailto:striva2906@gmail.com">striva2906@gmail.com</a>.</p>
+      <div class="callout">Это живой документ одного разработчика, а не шаблон юридического отдела — если что-то непонятно, проще всего написать и спросить напрямую.</div>
+    </section>
+
+  </article>
+</div>
+
+<footer>
+  <div class="rule">
+    <span>© 2026 Striva</span>
+    <span>com.ttdregon.mysafeapp</span>
+  </div>
+</footer>
+</body>
+</html>

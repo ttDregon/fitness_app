@@ -11,7 +11,7 @@ const front = path.resolve(__dirname, '..');
 const out = fs.mkdtempSync(path.join(os.tmpdir(), 'striva-logic-'));
 const ts = require(path.join(front, 'node_modules', 'typescript'));
 
-const files = ['src/utils/date.ts', 'src/utils/stats.ts', 'src/utils/companion.ts', 'src/data/exercises.ts', 'src/utils/authErrors.ts', 'src/utils/workout.ts', 'src/utils/premium.ts'];
+const files = ['src/utils/date.ts', 'src/utils/stats.ts', 'src/utils/companion.ts', 'src/data/exercises.ts', 'src/utils/authErrors.ts', 'src/utils/workout.ts', 'src/utils/premium.ts', 'src/utils/chatSync.ts'];
 for (const f of files) {
   const src = fs.readFileSync(path.join(front, f), 'utf8');
   const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
@@ -24,6 +24,7 @@ const stats = require(path.join(out, 'src/utils/stats.js'));
 const comp = require(path.join(out, 'src/utils/companion.js'));
 const auth = require(path.join(out, 'src/utils/authErrors.js'));
 const prem = require(path.join(out, 'src/utils/premium.js'));
+const cs = require(path.join(out, 'src/utils/chatSync.js'));
 
 let ok = true;
 const check = (name, cond, extra = '') => { console.log(`${cond ? 'PASS' : 'FAIL'} ${name} ${extra}`); ok = ok && cond; };
@@ -129,6 +130,53 @@ check('period days', prem.periodDays('P7D') === 7 && prem.periodDays('P1W') === 
 check('premium active', prem.isPremiumActive(new Date(Date.now() + 60000).toISOString()) && !prem.isPremiumActive(new Date(Date.now() - 1000).toISOString()) && !prem.isPremiumActive(null) && !prem.isPremiumActive('garbage'));
 check('premium date ru', prem.formatPremiumDate('2026-12-15T10:00:00Z') === '15 декабря 2026' && prem.formatPremiumDate(null) === '');
 check('default money format', /1\s?990/.test(prem.defaultMoneyFormat(1990e6, 'UAH')), prem.defaultMoneyFormat(1990e6, 'UAH'));
+
+// --- синхронизация истории ИИ-чата между устройствами (utils/chatSync.ts) ---
+const M = (id, text, sender = 'user') => ({ id, text, sender });
+const chat = (id, updatedAt, msgs) => ({ id, title: 't' + id, messages: msgs || [M(id + 'm', 'hi')], updatedAt });
+const row = (c, deleted = false) => ({ id: c.id, title: c.title, messages: c.messages, updated_at: String(c.updatedAt), deleted });
+const meta = r => ({ id: r.id, updated_at: r.updated_at, deleted: r.deleted });
+// Новое устройство: локально пусто → всё с сервера, удалённые не показываем.
+{
+  const srv = [row(chat('1', 100)), row(chat('2', 300)), row(chat('3', 200), true)];
+  const need = cs.chatIdsToFetch([], srv.map(meta));
+  check('new device fetches live chats', need.join() === '1,2', need.join());
+  const merged = cs.applyRemoteChats([], srv.map(meta), srv.filter(r => need.includes(r.id)));
+  check('new device sees history, newest first', merged.map(c => c.id).join() === '2,1' && merged[0].updatedAt === 300, merged.map(c => c.id).join());
+  check('remote messages kept', merged[1].messages.length === 1 && merged[1].messages[0].text === 'hi');
+}
+// Свежее локально — не скачиваем и не затираем; свежее на сервере — берём серверное.
+{
+  const local = [chat('1', 500, [M('a', 'local')]), chat('2', 100, [M('b', 'old')])];
+  const srv = [row(chat('1', 400, [M('x', 'srv')])), row(chat('2', 200, [M('y', 'new'), M('z', 'more', 'ai')]))];
+  const need = cs.chatIdsToFetch(local, srv.map(meta));
+  check('fetch only newer remote', need.join() === '2', need.join());
+  const merged = cs.applyRemoteChats(local, srv.map(meta), srv.filter(r => need.includes(r.id)));
+  const byId = Object.fromEntries(merged.map(c => [c.id, c]));
+  check('local newer wins', byId['1'].messages[0].text === 'local');
+  check('remote newer wins', byId['2'].messages.length === 2 && byId['2'].updatedAt === 200);
+  const synced = cs.syncedVersions(srv.map(meta));
+  check('dirty = local newer only', cs.dirtyChats(merged, synced).map(c => c.id).join() === '1');
+}
+// Удаление: на другом устройстве (надгробие свежее) — убираем; локально ожидающее — не воскрешаем.
+{
+  const local = [chat('1', 100), chat('2', 100), chat('4', 50)];
+  const srv = [row(chat('1', 150), true), row(chat('2', 100)), row(chat('5', 90))];
+  const merged = cs.applyRemoteChats(local, srv.map(meta), [row(chat('5', 90))], ['5']);
+  check('deleted elsewhere removed', !merged.some(c => c.id === '1'), merged.map(c => c.id).join());
+  check('pending local delete not resurrected', !merged.some(c => c.id === '5'));
+  check('local-only chat kept', merged.some(c => c.id === '4'));
+  check('local-only chat is dirty', cs.dirtyChats(merged, cs.syncedVersions(srv.map(meta))).map(c => c.id).join() === '4');
+  check('stale copy of deleted chat not dirty', cs.dirtyChats([chat('1', 100)], cs.syncedVersions(srv.map(meta))).length === 0);
+  check('pending delete not fetched', cs.chatIdsToFetch([], srv.map(meta), ['5']).join() === '2');
+}
+// Мусор с сервера не роняет экран; отметка времени монотонная даже при отстающих часах.
+{
+  const bad = cs.rowToSession({ id: 7, title: '', messages: [{ id: 'ok', text: 'x', sender: 'ai' }, null, { text: 1 }], updated_at: 'nope', deleted: false });
+  check('garbage messages filtered', bad.id === '7' && bad.messages.length === 1 && bad.updatedAt === 0 && bad.title);
+  check('non-array messages → []', cs.rowToSession({ id: '8', title: 'x', messages: { a: 1 }, updated_at: 5, deleted: false }).messages.length === 0);
+  check('stamp beats skewed clock', cs.nextChatStamp({ updatedAt: 5000 }, 1000) === 5001 && cs.nextChatStamp({ updatedAt: 5 }, 1000) === 1000 && cs.nextChatStamp(undefined, 7) === 7);
+}
 
 if (process.argv.includes('--print')) console.log('\n--- пример снимка для компаньона ---\n' + ctx);
 fs.rmSync(out, { recursive: true, force: true });

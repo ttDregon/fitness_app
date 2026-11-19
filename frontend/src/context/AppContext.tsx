@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
-import { Platform, Animated, Easing, LayoutAnimation, ScrollView, Linking } from 'react-native';
+import { Platform, Animated, Easing, LayoutAnimation, ScrollView, Linking, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isAuthApiError } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
@@ -8,6 +8,8 @@ import { getCurrentDateString, ymd, plural } from '../utils/date';
 import { computeNutritionTargets } from '../utils/nutrition';
 import { computeExerciseStats, computeWorkoutSummary } from '../utils/stats';
 import { buildCompanionContext } from '../utils/companion';
+import { applyRemoteChats, chatIdsToFetch, dirtyChats, nextChatStamp, syncedVersions } from '../utils/chatSync';
+import { fetchChatMeta, fetchChatRows, upsertChats, pushChatTombstones } from '../lib/chatSync';
 import { translateAuthError, isValidEmail } from '../utils/authErrors';
 import {
   parseWorkout, parseMeals, calculateLoss, sendChat, getBackendUrl, notifyUser, generateWorkoutPlan,
@@ -320,20 +322,20 @@ function useAppController() {
 
   // Грузим историю чатов один раз на пользователя (по user.id, а НЕ по объекту session —
   // иначе обновление токена меняет session и перечитывает хранилище, затирая свежий чат).
+  // Сначала — копия на телефоне (мгновенно и офлайн), затем сводим с облаком (chat_sessions):
+  // раньше история жила только на телефоне, и на новом устройстве её не было.
   const chatsLoadedRef = useRef<string | null>(null);
   useEffect(() => {
     const uid = session?.user?.id;
     if (!uid) { chatsLoadedRef.current = null; return; }
     let cancelled = false;
     (async () => {
-      const key = `chatSessions_${uid}`;
-      try {
-        const saved = Platform.OS !== 'web'
-          ? await AsyncStorage.getItem(key)
-          : (typeof window !== 'undefined' ? window.localStorage.getItem(key) : null);
-        if (!cancelled) setChatSessions(saved ? JSON.parse(saved) : []);
-      } catch (e) {}
-      if (!cancelled) chatsLoadedRef.current = uid; // сохранять можно только после загрузки
+      const saved = await kvGetJSON<ChatSession[]>(`chatSessions_${uid}`, []);
+      if (cancelled) return;
+      chatSessionsRef.current = Array.isArray(saved) ? saved : [];
+      setChatSessions(chatSessionsRef.current);
+      chatsLoadedRef.current = uid; // сохранять можно только после загрузки
+      syncChatsWithCloud(uid);
     })();
     return () => { cancelled = true; };
   }, [session?.user?.id]);
@@ -341,13 +343,110 @@ function useAppController() {
   useEffect(() => {
     const uid = session?.user?.id;
     if (!uid || chatsLoadedRef.current !== uid) return; // не затираем хранилище до первой загрузки
-    const key = `chatSessions_${uid}`;
-    try {
-      const val = JSON.stringify(chatSessions);
-      if (Platform.OS !== 'web') AsyncStorage.setItem(key, val);
-      else if (typeof window !== 'undefined') window.localStorage.setItem(key, val);
-    } catch (e) {}
+    chatSessionsRef.current = chatSessions;
+    kvSetJSON(`chatSessions_${uid}`, chatSessions);
+    scheduleChatPush(uid);
   }, [chatSessions, session?.user?.id]);
+
+  // ---- Облачная копия истории чата ----
+  // chatSyncRef.synced — какие версии диалогов (id → updatedAt) уже лежат на сервере; ready —
+  // сведение с сервером прошло, можно отправлять изменения. Пока ready = false (нет сети,
+  // таблица ещё не создана) — ничего не отправляем, повторим при возврате в приложение.
+  const chatSessionsRef = useRef<ChatSession[]>([]);
+  const chatSyncRef = useRef<{ uid: string | null; synced: Record<string, number>; ready: boolean }>({ uid: null, synced: {}, ready: false });
+  // Флаги «занято» хранят uid: сведение/отправка прежнего аккаунта не должны блокировать нового.
+  const chatSyncBusyRef = useRef<string | null>(null);
+  const chatPushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatPushingRef = useRef<string | null>(null);
+  const chatPushAgainRef = useRef<string | null>(null);
+  const lastChatPullRef = useRef(0);
+  // Удалённые на этом телефоне диалоги, «надгробия» которых ещё не дошли до сервера (id → отметка).
+  const chatDeletesKey = (uid: string) => `chatSessionsDeleted_${uid}`;
+
+  const syncChatsWithCloud = async (uid: string) => {
+    if (chatSyncBusyRef.current === uid) return;
+    chatSyncBusyRef.current = uid;
+    lastChatPullRef.current = Date.now();
+    try {
+      if (chatSyncRef.current.uid !== uid) chatSyncRef.current = { uid, synced: {}, ready: false };
+      const meta = await fetchChatMeta(uid);
+      if (!meta || isStale(uid)) return;
+      const deletes = Object.keys(await kvGetJSON<Record<string, number>>(chatDeletesKey(uid), {}));
+      const need = chatIdsToFetch(chatSessionsRef.current, meta, deletes);
+      const full = need.length ? await fetchChatRows(uid, need) : [];
+      if (!full || isStale(uid) || chatsLoadedRef.current !== uid) return;
+      chatSyncRef.current = { uid, synced: syncedVersions(meta), ready: true };
+      // Новый массив → эффект сохранения выше запишет его на диск и отправит на сервер то,
+      // чего там ещё нет (или что там старее).
+      setChatSessions(prev => applyRemoteChats(prev, meta, full, deletes));
+    } finally { if (chatSyncBusyRef.current === uid) chatSyncBusyRef.current = null; }
+  };
+
+  const scheduleChatPush = (uid: string, delay = 1200) => {
+    if (chatPushTimerRef.current) clearTimeout(chatPushTimerRef.current);
+    chatPushTimerRef.current = setTimeout(() => { chatPushTimerRef.current = null; pushChatsToCloud(uid); }, delay);
+  };
+
+  const pushChatsToCloud = async (uid: string) => {
+    const st = chatSyncRef.current;
+    if (!st.ready || st.uid !== uid || isStale(uid)) return;
+    if (chatPushingRef.current) { chatPushAgainRef.current = uid; return; }
+    chatPushingRef.current = uid;
+    try {
+      const dirty = dirtyChats(chatSessionsRef.current, st.synced);
+      if (dirty.length && !isStale(uid) && (await upsertChats(uid, dirty))) {
+        dirty.forEach(s => { st.synced[s.id] = Math.max(st.synced[s.id] || 0, s.updatedAt); });
+      }
+      const deletes = await kvGetJSON<Record<string, number>>(chatDeletesKey(uid), {});
+      if (Object.keys(deletes).length && !isStale(uid) && (await pushChatTombstones(uid, deletes))) {
+        const left = await kvGetJSON<Record<string, number>>(chatDeletesKey(uid), {});
+        Object.keys(deletes).forEach(id => { if (left[id] === deletes[id]) delete left[id]; delete st.synced[id]; });
+        if (Object.keys(left).length) await kvSetJSON(chatDeletesKey(uid), left);
+        else await kvRemove(chatDeletesKey(uid));
+      }
+    } finally {
+      chatPushingRef.current = null;
+      const again = chatPushAgainRef.current;
+      chatPushAgainRef.current = null;
+      if (again) scheduleChatPush(again, 300);
+    }
+  };
+
+  // Вернулись в приложение — подтягиваем переписку с других устройств (не чаще раза в 30 с);
+  // уходим в фон — сразу отправляем несохранённое (таймер в фоне может не успеть).
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', st => {
+      const uid = activeUidRef.current;
+      if (!uid || chatsLoadedRef.current !== uid) return;
+      if (st === 'active' && Date.now() - lastChatPullRef.current > 30000) syncChatsWithCloud(uid);
+      else if (st === 'background') { if (chatPushTimerRef.current) clearTimeout(chatPushTimerRef.current); chatPushTimerRef.current = null; pushChatsToCloud(uid); }
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Конструктор тренировки (несохранённые блоки на экране «Журнал») — тоже свой у каждого
+  // аккаунта и на диске. Раньше он жил только в памяти: при переключении аккаунта его
+  // стирали (чтобы не утёк в чужой), и при возврате запланированная тренировка пропадала.
+  const blocksLoadedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid) { blocksLoadedRef.current = null; return; }
+    let cancelled = false;
+    kvGetJSON<WorkoutBuilderBlock[]>(`workoutBlocks_${uid}`, []).then(saved => {
+      if (cancelled) return;
+      const list = Array.isArray(saved) ? saved.filter(b => b && typeof b.exercise === 'string' && Array.isArray(b.sets)) : [];
+      if (list.length) setWorkoutBlocks(prev => (prev.length ? [...list, ...prev.filter(p => !list.some(l => l.id === p.id))] : list));
+      blocksLoadedRef.current = uid;
+    });
+    return () => { cancelled = true; };
+  }, [session?.user?.id]);
+
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid || blocksLoadedRef.current !== uid) return; // до загрузки не затираем сохранённое
+    if (workoutBlocks.length) kvSetJSON(`workoutBlocks_${uid}`, workoutBlocks);
+    else kvRemove(`workoutBlocks_${uid}`);
+  }, [workoutBlocks, session?.user?.id]);
 
   // Пуш: настраиваем поведение в foreground + реагируем на тап по уведомлению (переход на вкладку).
   useEffect(() => {
@@ -381,20 +480,15 @@ function useAppController() {
     if (!session) return; // нет сессии → экран входа; bootReady не нужен
     let cancelled = false;
     const loadPending = async () => {
+      const uid = session.user?.id;
+      if (!uid) return;
       try {
-        if (Platform.OS !== 'web') {
-          const savedPending = await AsyncStorage.getItem('pendingExercises');
-          if (savedPending) setPendingExerciseCount(JSON.parse(savedPending).length);
-          const savedTime = await AsyncStorage.getItem('lastActivityTime');
-          if (savedTime) setLastActivityTime(parseInt(savedTime, 10));
-        } else {
-          if (typeof window !== 'undefined') {
-            const savedPending = window.localStorage.getItem('pendingExercises');
-            if (savedPending) setPendingExerciseCount(JSON.parse(savedPending).length);
-            const savedTime = window.localStorage.getItem('lastActivityTime');
-            if (savedTime) setLastActivityTime(parseInt(savedTime, 10));
-          }
-        }
+        await migrateLegacyPending(uid);
+        const savedPending = await kvGetJSON<WorkoutData[]>(pendingKey(uid), []);
+        const savedTime = await kvGet(activityKey(uid));
+        if (isStale(uid)) return;
+        setPendingExerciseCount(Array.isArray(savedPending) ? savedPending.length : 0);
+        setLastActivityTime(savedTime ? parseInt(savedTime, 10) : null);
       } catch (e) {}
     };
     // Ждём ключевые данные (но не дольше 7с), затем снимаем экран загрузки.
@@ -450,16 +544,15 @@ function useAppController() {
       if (!session || !session.user || currentWeight <= 0 || pendingWeightBusyRef.current) return;
       pendingWeightBusyRef.current = true;
       try {
-        let timeStr = null;
-        if (Platform.OS !== 'web') { timeStr = await AsyncStorage.getItem('lastActivityTime'); } else { timeStr = typeof window !== 'undefined' ? window.localStorage.getItem('lastActivityTime') : null; }
+        const uid = session.user.id;
+        const timeStr = await kvGet(activityKey(uid));
 
         if (!timeStr) return;
         const lastTime = parseInt(timeStr, 10);
         if (Date.now() - lastTime >= 3600000) {
-          let savedPending = null;
-          if (Platform.OS !== 'web') { savedPending = await AsyncStorage.getItem('pendingExercises'); } else { savedPending = typeof window !== 'undefined' ? window.localStorage.getItem('pendingExercises') : null; }
+          const savedPending = await kvGet(pendingKey(uid));
           // Сначала «забираем» подходы из хранилища, потом считаем — повторно их уже не посчитать.
-          if (Platform.OS !== 'web') { await AsyncStorage.removeItem('pendingExercises'); await AsyncStorage.removeItem('lastActivityTime'); } else { if (typeof window !== 'undefined') { window.localStorage.removeItem('pendingExercises'); window.localStorage.removeItem('lastActivityTime'); } }
+          await kvRemove(pendingKey(uid)); await kvRemove(activityKey(uid));
           setPendingExerciseCount(0); setLastActivityTime(null);
 
           if (savedPending) {
@@ -796,20 +889,38 @@ function useAppController() {
     return ok;
   };
 
+  // Подходы, ещё не учтённые в весе (через час после тренировки их «списывает» checkPendingWeight).
+  // Ключи — свои у каждого аккаунта: раньше они были общими на телефон, и тренировка одного
+  // аккаунта после переключения уменьшала вес другому.
+  const pendingKey = (uid: string) => `pendingExercises_${uid}`;
+  const activityKey = (uid: string) => `lastActivityTime_${uid}`;
+  // Версии до этой хранили подходы без привязки к аккаунту — отдаём их тому, кто сейчас вошёл.
+  const migrateLegacyPending = async (uid: string) => {
+    const legacy = await kvGet('pendingExercises');
+    const legacyTime = await kvGet('lastActivityTime');
+    if (legacy === null && legacyTime === null) return;
+    if (legacy !== null && (await kvGet(pendingKey(uid))) === null) {
+      await kvSet(pendingKey(uid), legacy);
+      if (legacyTime !== null) await kvSet(activityKey(uid), legacyTime);
+    }
+    await kvRemove('pendingExercises'); await kvRemove('lastActivityTime');
+  };
+
   const registerActivityForWeightLoss = async (exercisesArray: WorkoutData[], isAdding: boolean) => {
+    const uid = session?.user?.id;
+    if (!uid) return;
     try {
-      let saved = null;
-      if (Platform.OS !== 'web') { saved = await AsyncStorage.getItem('pendingExercises'); } else { saved = typeof window !== 'undefined' ? window.localStorage.getItem('pendingExercises') : null; }
-      let pending: WorkoutData[] = saved ? JSON.parse(saved) : [];
+      let pending = await kvGetJSON<WorkoutData[]>(pendingKey(uid), []);
+      if (!Array.isArray(pending)) pending = [];
       if (isAdding) pending = [...pending, ...exercisesArray];
       else { const idsToRemove = exercisesArray.map((e: WorkoutData) => e.id); pending = pending.filter((e: WorkoutData) => !idsToRemove.includes(e.id)); }
       const now = Date.now();
       if (pending.length > 0) {
-        if (Platform.OS !== 'web') { await AsyncStorage.setItem('pendingExercises', JSON.stringify(pending)); await AsyncStorage.setItem('lastActivityTime', now.toString()); } else { if (typeof window !== 'undefined') { window.localStorage.setItem('pendingExercises', JSON.stringify(pending)); window.localStorage.setItem('lastActivityTime', now.toString()); } }
-        setPendingExerciseCount(pending.length); setLastActivityTime(now);
+        await kvSet(pendingKey(uid), JSON.stringify(pending)); await kvSet(activityKey(uid), now.toString());
+        if (!isStale(uid)) { setPendingExerciseCount(pending.length); setLastActivityTime(now); }
       } else {
-        if (Platform.OS !== 'web') { await AsyncStorage.removeItem('pendingExercises'); await AsyncStorage.removeItem('lastActivityTime'); } else { if (typeof window !== 'undefined') { window.localStorage.removeItem('pendingExercises'); window.localStorage.removeItem('lastActivityTime'); } }
-        setPendingExerciseCount(0); setLastActivityTime(null);
+        await kvRemove(pendingKey(uid)); await kvRemove(activityKey(uid));
+        if (!isStale(uid)) { setPendingExerciseCount(0); setLastActivityTime(null); }
       }
     } catch (e) {}
   };
@@ -990,7 +1101,7 @@ function useAppController() {
     setTargetWeight(null); setStartWeight(null); setWorkoutBlocks([]); setPendingWorkoutPlan(null);
     setDailyCalorieNorm(0); setMaintenanceCalories(0); setDailyMacros({ protein: 0, fat: 0, carb: 0 }); setUserGoal('maintain');
     setSelectedMember(null); setMyDayPlan(null); setMemberDayPlan(null); setClientProfile(null);
-    setCompanionBrief(null);
+    setCompanionBrief(null); setPendingExerciseCount(0); setLastActivityTime(null);
     if (restEndsAt) { setRestEndsAt(null); cancelScheduled(REST_TIMER_ID); }
     nutritionExtraRef.current = { key: '', t: ZERO };
   };
@@ -1356,8 +1467,12 @@ function useAppController() {
                 supabase.from('workouts').delete().eq('user_id', uid),
                 supabase.from('group_members').delete().eq('user_id', uid),
                 supabase.from('profiles').delete().eq('id', uid),
+                supabase.from('chat_sessions').delete().eq('user_id', uid),
               ]);
-              await Promise.allSettled([kvRemove(`chatSessions_${uid}`), kvRemove(`companionBrief_${uid}`), kvRemove(`weight_logs_${uid}`)]);
+              await Promise.allSettled([
+                kvRemove(`chatSessions_${uid}`), kvRemove(chatDeletesKey(uid)), kvRemove(`companionBrief_${uid}`), kvRemove(`weight_logs_${uid}`),
+                kvRemove(`workoutBlocks_${uid}`), kvRemove(pendingKey(uid)), kvRemove(activityKey(uid)),
+              ]);
             }
             await persistAccounts((await kvGetJSON<SavedAccount[]>('savedAccounts', [])).filter(a => a.id !== uid));
             await supabase.auth.signOut({ scope: 'local' });
@@ -1614,7 +1729,7 @@ function useAppController() {
   };
 
   const appendToChat = (chatId: string, msg: ChatMessage) =>
-    smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, msg], updatedAt: Date.now() } : c)));
+    smoothStateUpdate(() => setChatSessions(prev => prev.map(c => c.id === chatId ? { ...c, messages: [...c.messages, msg], updatedAt: nextChatStamp(c) } : c)));
 
   // Один шаг диалога: шлём историю + снимок приложения, выполняем действия, которые попросил
   // компаньон (записать еду / воду / вес), и добавляем его ответ с отметками о сделанном.
@@ -1663,7 +1778,17 @@ function useAppController() {
   const deleteChat = (id: string) => {
     appAlert("Удаление", "Удалить этот диалог?", [
       { text: "Отмена", style: "cancel" },
-      { text: "Удалить", style: "destructive", onPress: () => { smoothStateUpdate(() => { setChatSessions(prev => prev.filter(c => c.id !== id)); if (activeChatId === id) setActiveChatId(null); }); }}
+      { text: "Удалить", style: "destructive", onPress: async () => {
+        // Сначала запоминаем удаление (оно уйдёт на сервер «надгробием» — иначе диалог вернулся
+        // бы с другого устройства), потом убираем с экрана.
+        const uid = session?.user?.id;
+        if (uid) {
+          const deletes = await kvGetJSON<Record<string, number>>(chatDeletesKey(uid), {});
+          deletes[id] = nextChatStamp(chatSessionsRef.current.find(c => c.id === id));
+          await kvSetJSON(chatDeletesKey(uid), deletes);
+        }
+        smoothStateUpdate(() => { setChatSessions(prev => prev.filter(c => c.id !== id)); if (activeChatId === id) setActiveChatId(null); });
+      }}
     ]);
   };
 
@@ -1688,7 +1813,7 @@ function useAppController() {
     const water = undone.filter(m => m.waterLogged?.date === today).reduce((a, m) => a + (m.waterLogged?.liters || 0), 0);
 
     smoothStateUpdate(() => {
-      setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: updatedMessages, updatedAt: Date.now() } : c));
+      setChatSessions(prev => prev.map(c => c.id === activeChatId ? { ...c, messages: updatedMessages, updatedAt: nextChatStamp(c) } : c));
       setEditingMessageId(null);
     });
     if (rowIds.length) {
@@ -1724,7 +1849,7 @@ function useAppController() {
     const generatedTitle = text.length > 25 ? text.substring(0, 25) + '...' : text;
     const newSessionContent: ChatSession = isNewChat
         ? { id: chatId, title: generatedTitle, messages: [userMsg], updatedAt: Date.now() }
-        : { ...activeChat!, messages: [...activeChat!.messages, userMsg], updatedAt: Date.now(), title: activeChat!.title === 'Новый диалог' ? generatedTitle : activeChat!.title };
+        : { ...activeChat!, messages: [...activeChat!.messages, userMsg], updatedAt: nextChatStamp(activeChat), title: activeChat!.title === 'Новый диалог' ? generatedTitle : activeChat!.title };
 
     smoothStateUpdate(() => setChatSessions(prev => isNewChat ? [newSessionContent, ...prev] : prev.map(c => c.id === chatId ? newSessionContent : c)));
     await runCompanionTurn(chatId, newSessionContent.messages);
